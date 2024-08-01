@@ -2,6 +2,7 @@ use core::f32;
 use std::{path::{Path, PathBuf}, u16};
 
 use dicom::{core::{DataElement, PrimitiveValue, VR}, dictionary_std::tags, pixeldata::PixelDecoder};
+use rustfft::num_traits::Pow;
 use tiff::decoder::DecodingResult;
 
 /**
@@ -12,6 +13,15 @@ pub struct Image3D {
     pub height: usize,
     pub depth: usize,
     pub data: Vec<f32>,
+    pub min: f32,
+    pub max: f32,
+}
+
+pub struct Image3D8 {
+    pub width: usize,
+    pub height: usize,
+    pub depth: usize,
+    pub data: Vec<u8>,
 }
 
 
@@ -26,6 +36,8 @@ pub struct Image3DFile {
     pub width: usize,
     pub height: usize,
     pub depth: usize,
+    pub min: f32,
+    pub max: f32,
     pub path: PathBuf,
 }
 
@@ -35,12 +47,14 @@ impl Image3D {
     /**
      * Create a new blank 3D image
      */
-    pub fn new(width: usize, height: usize, depth: usize) -> Image3D {
+    pub fn new(width: usize, height: usize, depth: usize, min: f32, max: f32) -> Image3D {
         Image3D {
             width: width,
             height: height,
             depth: depth,
             data: vec![0.0; width * height * depth],
+            min: min,
+            max: max,
         }
     }
 
@@ -75,13 +89,25 @@ impl Image3D {
             data: &self.data[start..start + self.width * self.height],
             width: self.width,
             height: self.height,
+            min: self.min,
+            max: self.max,
         }
+    }
+
+    pub fn calc_min_max(&self) -> (f32, f32) {
+        let mut min = f32::MAX;
+        let mut max = f32::MIN;
+        for i in 0..self.data.len() {
+            min = min.min(self.data[i]);
+            max = max.max(self.data[i]);
+        }
+        (min, max)
     }
 }
 
 
 impl Image3DFile {
-    pub fn new(width: usize, height: usize, depth: usize, path: PathBuf) -> Image3DFile {
+    pub fn new(width: usize, height: usize, depth: usize, min: f32, max: f32, path: PathBuf) -> Image3DFile {
         if !path.exists() {
             panic!("File does not exist");
         }
@@ -91,6 +117,8 @@ impl Image3DFile {
             height: height,
             depth: depth,
             path: path,
+            min: min,
+            max: max,
         }
     }
     pub fn get_image(&self) -> Image3D {
@@ -106,6 +134,8 @@ impl Image3DFile {
         self.width = image.width;
         self.height = image.height;
         self.depth = image.depth;
+        self.min = image.min;
+        self.max = image.max;
     }
 }
 
@@ -113,12 +143,16 @@ pub struct FrameSlice<'a> {
     pub data: &'a [f32],
     pub width: usize,
     pub height: usize,
+    pub min: f32,
+    pub max: f32,
 }
 
 pub struct Image2D {
     pub width: usize,
     pub height: usize,
     pub data: Vec<f32>,
+    pub min: f32,
+    pub max: f32,
 }
 
 #[allow(dead_code)]
@@ -126,10 +160,12 @@ impl Image2D {
     /**
      * Create a new blank 2D image
      */
-    pub fn new(width: usize, height: usize) -> Image2D {
+    pub fn new(width: usize, height: usize, min: f32, max: f32) -> Image2D {
         Image2D {
             width: width,
             height: height,
+            min: min,
+            max: max,
             data: vec![0.0; width * height],
         }
     }
@@ -168,7 +204,6 @@ pub fn save_as_dcm(
     let depth = image.depth;
     let width = image.width;
     let height = image.height;
-
     let pixel_data = image3d_to_u16(image);
 
     let mut new_obj = dicom::object::InMemDicomObject::new_empty();
@@ -278,14 +313,14 @@ pub fn save_as_dcm(
  * Save the image as a DICOM file
  */
 #[allow(dead_code)]
-pub fn save_as_dcm_16(
+pub fn save_as_dcm_8(
     file_path: &Path,
-    image: &Image3D16
+    image: Image3D8
 ) {
     let depth = image.depth;
     let width = image.width;
     let height = image.height;
-    let pixel_data = &image.data;
+    let pixel_data = image.data;
 
     let mut new_obj = dicom::object::InMemDicomObject::new_empty();
     new_obj.put(DataElement::new(
@@ -333,17 +368,17 @@ pub fn save_as_dcm_16(
     new_obj.put(DataElement::new(
         tags::BITS_ALLOCATED,
         VR::US,
-        PrimitiveValue::from(16_u16),
+        PrimitiveValue::from(8_u16),
     ));
     new_obj.put(DataElement::new(
         tags::BITS_STORED,
         VR::US,
-        PrimitiveValue::from(16_u16),
+        PrimitiveValue::from(8_u16),
     ));
     new_obj.put(DataElement::new(
         tags::HIGH_BIT,
         VR::US,
-        PrimitiveValue::from(15_u16),
+        PrimitiveValue::from(7_u16),
     ));
 
     new_obj.put(DataElement::new(
@@ -361,13 +396,13 @@ pub fn save_as_dcm_16(
     new_obj.put(DataElement::new(
         tags::LARGEST_IMAGE_PIXEL_VALUE,
         VR::US,
-        PrimitiveValue::from(65535_u16),
+        PrimitiveValue::from(255_u16),
     ));
 
     new_obj.put(DataElement::new(
         tags::PIXEL_DATA,
         VR::OW,
-        PrimitiveValue::from(unsafe { pixel_data.align_to::<u8>().1 }),
+        PrimitiveValue::from(pixel_data),
     ));
 
     let class_uid = "1.2.840.10008.5.1.4.1.1.7.3";
@@ -414,16 +449,11 @@ pub fn save_as_tiff(
  * Convert the image to a vector of u16
  */
 pub fn image3d_to_u16(image: &Image3D) -> Vec<u16> {
-    let mut min = f32::INFINITY;
-    let mut max = f32::NEG_INFINITY;
-    for &x in &image.data {
-        if x < min {
-            min = x;
-        }
-        if x > max {
-            max = x;
-        }
-    }
+    let (min, max) = if image.max - image.min == 0.0 {
+        image.calc_min_max()
+    } else {
+        (image.min, image.max)
+    };
     let range = max - min;
 
     image.data.iter().map(|x| ((x - min) / range * u16::MAX as f32).round().clamp(0.0, u16::MAX as f32) as u16).collect::<Vec<u16>>()
@@ -441,11 +471,16 @@ pub fn read_dcm(file_path: &Path) -> Image3D {
     let width = image.columns() as usize;
     let vec = image.to_vec().unwrap();
 
+    let min = 0.0;
+    let max = (2.pow(image.bits_allocated()) - 1) as f32;
+
     Image3D {
         depth,
         width,
         height,
         data: vec,
+        min,
+        max,
     }
 }
 
@@ -459,14 +494,17 @@ pub fn read_tiff(file_path: &Path) -> Image3D {
     let width = decoder.dimensions().unwrap().0 as usize;
     let height = decoder.dimensions().unwrap().1 as usize;
     let mut vec = Vec::new();
+    let mut max = 0;
     loop {
 
         let image: DecodingResult = decoder.read_image().unwrap();
 
         if let DecodingResult::U8(data) = image {
             vec.extend(data.iter().map(|x| *x as f32));
+            max = max.max(255);
         } else if let DecodingResult::U16(data) = image {
             vec.extend(data.iter().map(|x| *x as f32));
+            max = max.max(u16::MAX);
         } else {
             panic!("Unsupported data type");
         }
@@ -485,5 +523,7 @@ pub fn read_tiff(file_path: &Path) -> Image3D {
         width,
         height,
         data: vec.iter().map(|x| *x as f32).collect(),
+        min: 0.0,
+        max: max as f32,
     }
 }

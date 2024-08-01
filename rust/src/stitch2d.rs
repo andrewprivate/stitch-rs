@@ -171,6 +171,8 @@ pub fn stitch(
                             .iter()
                             .map(|x| x.norm() as f32)
                             .collect::<Vec<_>>(),
+                        min: 0.0,
+                        max: 0.0,
                     };
 
                     let mut peaks = find_peaks_2d(&image, check_peaks)
@@ -379,6 +381,8 @@ fn extract_image_with_roi(image: &Image2D, roi: &IBox2D) -> Image2D {
         width,
         height,
         data: vec![0.0; (width * height) as usize],
+        min: image.min,
+        max: image.max,
     };
 
     for y in 0..height {

@@ -192,6 +192,8 @@ pub fn stitch(
                         width: max_size.0,
                         height: max_size.1,
                         depth: max_size.2,
+                        min: 0.0,
+                        max: 0.0,
                         data: phase_corr
                             .iter()
                             .map(|x| x.norm())
@@ -469,6 +471,8 @@ fn extract_image_with_roi(
         width,
         height,
         depth,
+        min: image.min,
+        max: image.max,
         data: vec![0.0; (width * height * depth) as usize],
     };
 

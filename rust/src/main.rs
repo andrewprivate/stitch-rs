@@ -1,6 +1,6 @@
 use fuse::{fuse_2d, fuse_3d, FuseMode};
-use image::{read_dcm, read_tiff, save_as_dcm, Image2D, Image3D, Image3DFile};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use image::{read_dcm, read_tiff, save_as_dcm, save_as_dcm_8, Image2D, Image3D, Image3D8, Image3DFile};
+use rayon::prelude::*;
 use serde_json::*;
 use std::path::{Path, PathBuf};
 use stitch2d::IBox2D;
@@ -360,7 +360,7 @@ fn stitch_3d(
         .tile_paths
         .into_par_iter()
         .map(|path| {
-            let mut imagefile = Image3DFile::new(0, 0, 0, path.to_path_buf());
+            let mut imagefile = Image3DFile::new(0, 0, 0, 0.0,0.0, path.to_path_buf());
             imagefile.load_dims();
 
             imagefile
@@ -420,10 +420,11 @@ fn stitch_3d(
                 offset,
                 config.fuse_mode,
             );
+
             let output_file = format!("stitched_{}.dcm", i);
             let buf = config.output_path.join(output_file);
             let path = buf.as_path();
-            save_as_dcm(path, &fused_image);
+            save_as_dcm_8(path, fused_image);
         });
 
     println!("Time to fuse images: {:?}", start.elapsed());
@@ -452,6 +453,8 @@ fn stitch_2d(
                 data: frame.data.to_vec(),
                 width: frame.width,
                 height: frame.height,
+                min: frame.min,
+                max: frame.max,
             }
         })
         .collect::<Vec<_>>();
@@ -518,12 +521,15 @@ fn stitch_2d(
             let output_file = format!("stitched_{}.dcm", i);
             let buf = config.output_path.join(output_file);
             let path = buf.as_path();
-            let image3d = Image3D {
+            let mut image3d = Image3D {
                 data: fused_image.data,
                 width: fused_image.width,
                 height: fused_image.height,
+                min: fused_image.min,
+                max: fused_image.max,
                 depth: 1,
             };
+
             save_as_dcm(path, &image3d);
         });
 
