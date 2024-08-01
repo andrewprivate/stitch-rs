@@ -121,7 +121,7 @@ pub fn fuse_2d(
         height: height as usize,
         data: new_image,
         min,
-        max
+        max,
     }
 }
 
@@ -163,12 +163,36 @@ pub fn fuse_3d(
     }
 
     println!("Fusing image {} x {} x {}", width, height, depth);
-    let mut new_image: Vec<u16> = vec![0; (width * height * depth) as usize];
     let mut new_image_counts: Vec<u8> = vec![];
     if mode == FuseMode::Average {
         new_image_counts = vec![0; (width * height * depth) as usize];
+
+        for i in 0..num_images {
+            let image = &images[subgraph_indexes[i]];
+            let offset = offsets[i];
+            let offset_i = (offset.0.floor(), offset.1.floor(), offset.2.floor());
+            let offset_i = (offset_i.0 as i64, offset_i.1 as i64, offset_i.2 as i64);
+
+            let start_x = offset_i.0.max(0);
+            let start_y = offset_i.1.max(0);
+            let start_z = offset_i.2.max(0);
+            let end_x = (offset_i.0 + image.width as i64).min(width as i64);
+            let end_y = (offset_i.1 + image.height as i64).min(height as i64);
+            let end_z = (offset_i.2 + image.depth as i64).min(depth as i64);
+
+            for z in start_z..end_z {
+                for y in start_y..end_y {
+                    for x in start_x..end_x {
+                        let index = (x + y * width + z * width * height) as usize;
+                        new_image_counts[index] += 1;
+                    }
+                }
+            }
+        }
     }
 
+
+    let mut new_image: Vec<u8> = vec![0; (width * height * depth) as usize];
     for i in 0..num_images {
         let image = images[subgraph_indexes[i]].get_image();
         let offset = offsets[i];
@@ -251,10 +275,10 @@ pub fn fuse_3d(
 
                     let index = (x + y * width + z * width * height) as usize;
 
-                    let val = ((val - min) / (max - min) * 255.0).clamp(0.0, 255.0) as u16;
+                    let val = ((val - min) / (max - min) * 255.0).clamp(0.0, 255.0) as u8;
                     match mode {
                         FuseMode::Average => {
-                            new_image[index] += val;
+                            new_image[index] = new_image[index].saturating_add(val / new_image_counts[index]);
                         }
                         FuseMode::Max => {
                             new_image[index] = new_image[index].max(val);
@@ -270,27 +294,8 @@ pub fn fuse_3d(
             }
         }
 
-        if mode == FuseMode::Average {
-            for z in start_z..end_z {
-                for y in start_y..end_y {
-                    for x in start_x..end_x {
-                        let index = (x + y * width + z * width * height) as usize;
-                        new_image_counts[index] += 1;
-                    }
-                }
-            }
-        }
-
         println!("Image {} stitched", i + 1);
         drop(image);
-    }
-
-    if mode == FuseMode::Average {
-        new_image.par_iter_mut().zip(new_image_counts.par_iter()).for_each(|(val, count)| {
-            if *count > 0 {
-                *val /= *count as u16;
-            }
-        });
     }
 
     println!("Image fused!");
@@ -299,6 +304,6 @@ pub fn fuse_3d(
         width: width as usize,
         height: height as usize,
         depth: depth as usize,
-        data: new_image.into_iter().map(|x| x as u8).collect(),
+        data: new_image
     }
 }
