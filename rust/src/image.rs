@@ -3,6 +3,7 @@ use std::{path::{Path, PathBuf}, u16};
 
 use dicom::{core::{DataElement, PrimitiveValue, VR}, dictionary_std::tags, pixeldata::PixelDecoder};
 use rustfft::num_traits::Pow;
+use serde_json::de;
 use tiff::decoder::DecodingResult;
 
 /**
@@ -127,15 +128,6 @@ impl Image3DFile {
         } else {
             read_tiff(&self.path)
         }
-    }
-
-    pub fn load_dims(&mut self) {
-        let image = self.get_image();
-        self.width = image.width;
-        self.height = image.height;
-        self.depth = image.depth;
-        self.min = image.min;
-        self.max = image.max;
     }
 }
 
@@ -485,6 +477,30 @@ pub fn read_dcm(file_path: &Path) -> Image3D {
 }
 
 /**
+ * Read the image from a dicom file
+ */
+pub fn read_dcm_headers(file_path: &Path) -> Image3DFile {
+    let dicom_obj = dicom::object::open_file(file_path).unwrap();
+
+    let image = dicom_obj.decode_pixel_data().unwrap();
+    let depth = image.number_of_frames() as usize;
+    let height = image.rows() as usize;
+    let width = image.columns() as usize;
+
+    let min = 0.0;
+    let max = (2.pow(image.bits_allocated()) - 1) as f32;
+
+    Image3DFile {
+        depth,
+        width,
+        height,
+        min,
+        max,
+        path: file_path.to_path_buf(),
+    }
+}
+
+/**
  * Read the image from a TIFF file
  */
 #[allow(dead_code)]
@@ -525,5 +541,46 @@ pub fn read_tiff(file_path: &Path) -> Image3D {
         data: vec.iter().map(|x| *x as f32).collect(),
         min: 0.0,
         max: max as f32,
+    }
+}
+
+
+/**
+ * Read the image from a TIFF file
+ */
+#[allow(dead_code)]
+pub fn read_tiff_headers(file_path: &Path) -> Image3DFile {
+    let mut decoder = tiff::decoder::Decoder::new(std::fs::File::open(file_path).unwrap()).unwrap();
+    let mut depth = 0;
+    let width = decoder.dimensions().unwrap().0 as usize;
+    let height = decoder.dimensions().unwrap().1 as usize;
+    let mut max = 0;
+    loop {
+        let image: DecodingResult = decoder.read_image().unwrap();
+
+        if let DecodingResult::U8(data) = image {
+            max = max.max(255);
+        } else if let DecodingResult::U16(data) = image {
+            max = max.max(u16::MAX);
+        } else {
+            panic!("Unsupported data type");
+        }
+
+        depth += 1;
+
+        if !decoder.more_images() {
+            break;
+        }
+
+        decoder.next_image().unwrap();
+    }
+
+    Image3DFile {
+        depth,
+        width,
+        height,
+        min: 0.0,
+        max: max as f32,
+        path: file_path.to_path_buf(),
     }
 }

@@ -1,5 +1,5 @@
 use fuse::{fuse_2d, fuse_3d, FuseMode};
-use image::{read_dcm, read_tiff, save_as_dcm, save_as_dcm_8, Image2D, Image3D, Image3D8, Image3DFile};
+use image::{read_dcm, read_dcm_headers, read_tiff, read_tiff_headers, save_as_dcm, save_as_dcm_8, Image2D, Image3D, Image3D8, Image3DFile};
 use rayon::prelude::*;
 use serde_json::*;
 use std::path::{Path, PathBuf};
@@ -11,7 +11,7 @@ mod image;
 mod stitch2d;
 mod stitch3d;
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum StitchMode {
     TwoD,
     ThreeD,
@@ -69,6 +69,8 @@ pub struct StitchConfig {
     pub mode: StitchMode,
     pub overlap_ratio: f32,
     pub correlation_threshold: f32,
+    pub relative_error_threshold: f32,
+    pub absolute_error_threshold: f32,
     pub check_peaks: usize,
     pub dimension_mask: (bool, bool, bool),
     pub fuse_mode: FuseMode,
@@ -86,6 +88,8 @@ impl StitchConfig {
             mode: StitchMode::TwoD,
             overlap_ratio: 0.2,
             correlation_threshold: 0.3,
+            relative_error_threshold: 2.5,
+            absolute_error_threshold: 3.5,
             check_peaks: 5,
             dimension_mask: (true, true, true),
             fuse_mode: FuseMode::Average,
@@ -109,6 +113,7 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
     // Check version
     if !json.get("version").is_none() {
         config.version = json["version"].as_str().unwrap().to_string();
+        println!("Version: {}", config.version);
     }
 
     // Get 3d or 2d
@@ -129,19 +134,24 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
         }
     }
 
+    println!("Mode: {:?}", config.mode);
+
     // Check overlap ratio
     if !json.get("overlap_ratio").is_none() {
         config.overlap_ratio = json["overlap_ratio"].as_f64().unwrap() as f32;
+        println!("Overlap ratio: {}", config.overlap_ratio);
     }
 
     // Check correlation threshold
     if !json.get("correlation_threshold").is_none() {
         config.correlation_threshold = json["correlation_threshold"].as_f64().unwrap() as f32;
+        println!("Correlation threshold: {}", config.correlation_threshold);
     }
 
     // Check check peaks
     if !json.get("check_peaks").is_none() {
         config.check_peaks = json["check_peaks"].as_u64().unwrap() as usize;
+        println!("Check peaks: {}", config.check_peaks);
     }
 
     // Check dimension mask
@@ -162,6 +172,8 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
         }
 
         config.dimension_mask = (x, y, z);
+
+        println!("Dimension mask: {:?}", config.dimension_mask);
     }
 
     // Check fuse mode
@@ -184,11 +196,15 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
                 panic!("Invalid fuse mode");
             }
         }
+
+        println!("Fuse mode: {:?}", config.fuse_mode);
     }
 
     // Check no fuse
     if !json.get("no_fuse").is_none() {
         config.no_fuse = json["no_fuse"].as_bool().unwrap();
+
+        println!("No fuse: {}", config.no_fuse);
     }
 
     // Check output path
@@ -354,18 +370,27 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
 fn stitch_3d(
     config: StitchConfig,
 ) {
-    println!("Reading files...");
+    println!("Reading files for size information...");
     let start = std::time::Instant::now();
     let images = config
         .tile_paths
         .into_par_iter()
         .map(|path| {
-            let mut imagefile = Image3DFile::new(0, 0, 0, 0.0,0.0, path.to_path_buf());
-            imagefile.load_dims();
-
-            imagefile
+            if path.extension().unwrap() == "dcm" {
+                read_dcm_headers(&path)
+            } else {
+                read_tiff_headers(&path)
+            }
         })
         .collect::<Vec<_>>();
+
+    // Print file sizes
+    images.iter().for_each(|image| {
+        println!(
+            "Width: {}, Height: {}, Depth: {} Min: {} Max: {}",
+            image.width, image.height, image.depth, image.min, image.max
+        );
+    });
 
     println!("Time to read files: {:?}", start.elapsed());
 
@@ -388,19 +413,21 @@ fn stitch_3d(
             config.overlap_ratio,
             config.check_peaks,
             config.correlation_threshold,
+            config.relative_error_threshold,
+            config.absolute_error_threshold,
             config.dimension_mask,
         );
         println!("Time to find alignment: {:?}", start.elapsed());
         stitched_result = Some(result);
+
+        let json = json!(stitched_result);
+        let json_str = json.to_string();
+        let json_path = config.output_path.join("align_values.json");
+        std::fs::write(json_path.clone(), json_str).unwrap();
+        println!("Alignment values saved to: {:?}", json_path);
     }
 
     let stitched_result = stitched_result.unwrap();
-
-    let json = json!(stitched_result);
-    let json_str = json.to_string();
-    let json_path = config.output_path.join("align_values.json");
-
-    std::fs::write(json_path, json_str).unwrap();
 
     if config.no_fuse {
         return;
@@ -421,7 +448,7 @@ fn stitch_3d(
                 config.fuse_mode,
             );
 
-            let output_file = format!("stitched_{}.dcm", i);
+            let output_file = format!("fused_{}.dcm", i);
             let buf = config.output_path.join(output_file);
             let path = buf.as_path();
             save_as_dcm_8(path, fused_image);
@@ -486,19 +513,21 @@ fn stitch_2d(
             config.overlap_ratio,
             config.check_peaks,
             config.correlation_threshold,
+            config.relative_error_threshold,
+            config.absolute_error_threshold,
             dim_mask,
         );
         println!("Time to find alignment: {:?}", start.elapsed());
         stitched_result = Some(result);
+
+        let json = json!(stitched_result);
+        let json_str = json.to_string();
+        let json_path = config.output_path.join("align_values.json");
+        std::fs::write(json_path.clone(), json_str).unwrap();
+        println!("Alignment values saved to: {:?}", json_path);
     }
 
     let stitched_result = stitched_result.unwrap();
-
-    let json = json!(stitched_result);
-    let json_str = json.to_string();
-    let json_path = config.output_path.join("align_values.json");
-
-    std::fs::write(json_path, json_str).unwrap();
 
     if config.no_fuse {
         return;
@@ -518,10 +547,10 @@ fn stitch_2d(
                 offset,
                 config.fuse_mode,
             );
-            let output_file = format!("stitched_{}.dcm", i);
+            let output_file = format!("fused_{}.dcm", i);
             let buf = config.output_path.join(output_file);
             let path = buf.as_path();
-            let mut image3d = Image3D {
+            let image3d = Image3D {
                 data: fused_image.data,
                 width: fused_image.width,
                 height: fused_image.height,

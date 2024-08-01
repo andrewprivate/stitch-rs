@@ -1,10 +1,11 @@
-use std::sync::Mutex;
-use serde::{Deserialize, Serialize};
+use dicom::core::chrono::offset;
 use rayon::prelude::*;
 use rustfft::{num_complex::Complex, num_traits::Zero, FftNum, FftPlanner};
+use serde::{Deserialize, Serialize};
+use std::{path::Path, sync::Mutex};
 use transpose::transpose;
 
-use crate::image::{Image3D, Image3DFile};
+use crate::image::{save_as_dcm, Image3D, Image3DFile};
 
 #[derive(Debug)]
 pub struct IBox3D {
@@ -27,10 +28,7 @@ impl IBox3D {
             depth,
         }
     }
-    pub fn is_overlapping(
-        self: &IBox3D,
-        other: &IBox3D,
-    ) -> bool {
+    pub fn is_overlapping(self: &IBox3D, other: &IBox3D) -> bool {
         let min_x = self.x;
         let max_x = self.x + self.width;
         let min_y = self.y;
@@ -50,8 +48,8 @@ impl IBox3D {
             && min_y <= other_max_y
             && max_y >= other_min_y
             && min_z <= other_max_z
-            && max_z >= other_min_z {
-
+            && max_z >= other_min_z
+        {
             // Check if corners
             let is_on_edge_x = min_x == other_max_x || max_x == other_min_x;
             let is_on_edge_y = min_y == other_max_y || max_y == other_min_y;
@@ -82,7 +80,9 @@ pub struct StitchGraph3D {
 pub struct Pair3D {
     pub i: usize,
     pub j: usize,
-    pub peaks: Vec<(i64, i64, i64, f32)>,
+    pub offset: (i64, i64, i64),
+    pub weight: f32,
+    pub valid: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -98,6 +98,8 @@ pub fn stitch(
     overlap_ratio: f32,
     check_peaks: usize,
     correlation_threshold: f32,
+    relative_error_threshold: f32,
+    absolute_error_threshold: f32,
     dimension_mask: (bool, bool, bool),
 ) -> Stitch3DResult {
     let mut overlap_map = create_overlap_map(images, layout);
@@ -113,14 +115,13 @@ pub fn stitch(
 
     let todo: usize = overlap_map.iter().map(|x| x.len()).sum();
     let done = Mutex::new(0);
-    let pairs: Vec<Pair3D> = overlap_map
-        .par_iter()
+    let mut pairs: Vec<Pair3D> = overlap_map
+        .iter()
         .enumerate()
         .flat_map(|(i, overlap_list)| {
-
             let image_ref_file = &images[i];
             let image_ref = image_ref_file.get_image();
-            
+
             overlap_list
                 .iter()
                 .map(|&j| {
@@ -128,13 +129,20 @@ pub fn stitch(
                     let layout_move = &layout[j];
                     let image_move = images[j].get_image();
 
-                    let (ref_img, ref_roi, mov_img, mov_roi) = get_intersection(
+                    println!("Processing {} - {}", i, j);
+
+                    let start = std::time::Instant::now();
+
+                    let (ref_roi, mov_roi) = get_intersection(
                         &image_ref,
                         layout_ref,
                         &image_move,
                         layout_move,
                         overlap_ratio,
                     );
+
+                    let ref_img = extract_image_with_roi(&image_ref, &ref_roi);
+                    let mov_img = extract_image_with_roi(&image_move, &mov_roi);
 
                     drop(image_move);
 
@@ -143,11 +151,27 @@ pub fn stitch(
                         ref_roi.height.max(mov_roi.height) as usize,
                         ref_roi.depth.max(mov_roi.depth) as usize,
                     );
+                    println!("Intersection took {:?}", start.elapsed());
 
-                    let mut ref_fft = to_complex_with_padding(&ref_img, max_size.0, max_size.1, max_size.2);
-                    let mut mov_fft = to_complex_with_padding(&mov_img, max_size.0, max_size.1, max_size.2);
+                    // if i == 0 && j == 5 {
+                    //     let file_path = "ref.dcm";
+                    //     save_as_dcm(Path::new(file_path), &ref_img);
+                    //     let file_path = "mov.dcm";
+                    //     save_as_dcm(Path::new(file_path), &mov_img);
+                    // }
 
-                    fft_3d(
+                    let start = std::time::Instant::now();
+
+                    let mut ref_fft =
+                        to_complex_with_padding(&ref_img, max_size.0, max_size.1, max_size.2);
+                    let mut mov_fft =
+                        to_complex_with_padding(&mov_img, max_size.0, max_size.1, max_size.2);
+
+                    println!("Padding took {:?}", start.elapsed());
+
+                    let start = std::time::Instant::now();
+
+                    fft_3d_par(
                         max_size.0,
                         max_size.1,
                         max_size.2,
@@ -155,7 +179,7 @@ pub fn stitch(
                         rustfft::FftDirection::Forward,
                     );
 
-                    fft_3d(
+                    fft_3d_par(
                         max_size.0,
                         max_size.1,
                         max_size.2,
@@ -163,9 +187,13 @@ pub fn stitch(
                         rustfft::FftDirection::Forward,
                     );
 
+                    println!("FFT took {:?}", start.elapsed());
+
+                    let start = std::time::Instant::now();
+
                     let mut phase_corr = ref_fft
-                        .iter()
-                        .zip(mov_fft.iter())
+                        .par_iter()
+                        .zip(mov_fft.par_iter())
                         .map(|(a, b)| {
                             let res = a * b.conj();
                             let norm = res.norm();
@@ -177,13 +205,15 @@ pub fn stitch(
                         })
                         .collect::<Vec<_>>();
 
-                    fft_3d(
+                    fft_3d_par(
                         max_size.2,
                         max_size.1,
                         max_size.0,
                         &mut phase_corr,
                         rustfft::FftDirection::Inverse,
                     );
+
+                    println!("Phase correlation took {:?}", start.elapsed());
 
                     drop(ref_fft);
                     drop(mov_fft);
@@ -194,13 +224,17 @@ pub fn stitch(
                         depth: max_size.2,
                         min: 0.0,
                         max: 0.0,
-                        data: phase_corr
-                            .iter()
-                            .map(|x| x.norm())
-                            .collect::<Vec<_>>(),
+                        data: phase_corr.par_iter().map(|x| x.norm()).collect::<Vec<_>>(),
                     };
 
                     drop(phase_corr);
+
+                    // if i == 0 && j == 5 {
+                    //     let file_path = "phase_corr.dcm";
+                    //     save_as_dcm(Path::new(file_path), &image);
+                    // }
+
+                    let start = std::time::Instant::now();
 
                     let mut peaks = find_peaks_3d(&image, check_peaks)
                         .iter()
@@ -223,7 +257,7 @@ pub fn stitch(
                     });
 
                     // Test peaks
-                    peaks.iter_mut().for_each(|peak| {
+                    peaks.par_iter_mut().for_each(|peak| {
                         let res = test_cross_3d(&ref_img, &mov_img, (peak.0, peak.1, peak.2), 0.01);
                         peak.3 = res.0;
                     });
@@ -244,14 +278,25 @@ pub fn stitch(
                         peak.2 += ref_roi.z - mov_roi.z;
                     });
 
+                    println!("Peak finding took {:?}", start.elapsed());
+
                     let mut done2 = done.lock().unwrap();
                     *done2 += 1;
-                    println!("Progress: {}/{}", *done2, todo);
+                    println!(
+                        "Progress {}/{}: {} - {} {:?}",
+                        *done2,
+                        todo,
+                        i,
+                        j,
+                        peaks.first().unwrap_or(&(0, 0, 0, 0.0))
+                    );
 
                     Pair3D {
                         i,
                         j,
-                        peaks,
+                        offset: peaks.first().map(|x| (x.0, x.1, x.2)).unwrap_or((0, 0, 0)),
+                        weight: peaks.first().map(|x| x.3).unwrap_or(0.0),
+                        valid: peaks.len() > 0,
                     }
                 })
                 .collect::<Vec<_>>()
@@ -259,21 +304,118 @@ pub fn stitch(
         .collect::<Vec<_>>();
 
     println!("Global optimization");
-    let graph = pairs_to_graph(&pairs, images.len());
-    let subgraphs = find_subgraphs(&graph);
-    let offsets = subgraphs
-        .iter()
-        .map(|subgraph_indexes| {
-            let subgraph = extract_subgraph(&graph, subgraph_indexes);
-            calculate_offsets_from_graph(&subgraph)
-        })
-        .collect::<Vec<_>>();
- 
+    let mut offsets;
+    let mut subgraphs;
+    loop {
+        let graph = pairs_to_graph(&pairs, images.len());
+        subgraphs = find_subgraphs(&graph);
+
+        let mut redo = false;
+        offsets = subgraphs
+            .iter()
+            .map(|subgraph_indexes| {
+                let subgraph = extract_subgraph(&graph, subgraph_indexes);
+                calculate_offsets_from_graph(&subgraph)
+            })
+            .collect::<Vec<_>>();
+
+        for (i, subgraph) in subgraphs.iter().enumerate() {
+            let (mean_error, max_error, mean_dst, max_dst, worst_pair_index) =
+                check_offsets(&pairs, subgraph, &offsets[i]);
+
+            println!(
+                "Subgraph {} - N: {} Mean error: {} Max error: {} Mean dst: {} Max dst: {}",
+                i, subgraph.len(), mean_error, max_error, mean_dst, max_dst
+            );
+
+            if (mean_error * relative_error_threshold < max_error && max_error > 0.95) || mean_error > absolute_error_threshold {
+                let worst_pair = &mut pairs[worst_pair_index];
+                println!(
+                    "Identified worst pair: {} - {} Offset: {:?} R: {} Error: {}",
+                    worst_pair.i, worst_pair.j, worst_pair.offset, worst_pair.weight, max_error
+                );
+
+                worst_pair.valid = false;
+
+                redo = true;
+                break;
+            }
+        }
+
+        if !redo {
+            break;
+        }
+
+        println!("Redoing optimization");
+
+    }
+
     Stitch3DResult {
         pairs,
         subgraphs,
         offsets,
     }
+}
+
+fn check_offsets(
+    pairs: &[Pair3D],
+    subgraph: &[usize],
+    offsets: &[(f32, f32, f32)],
+) -> (f32, f32, f32, f32, usize) {
+    let mut mean_error: f32 = 0.0;
+    let mut max_error: f32 = 0.0;
+    let mut mean_dst: f32 = 0.0;
+    let mut max_dst: f32 = 0.0;
+    let mut worst_pair_index = 0;
+
+    let mut n = 0;
+    pairs.iter().enumerate().for_each(|(index, pair)| {
+        if !pair.valid {
+            return;
+        }
+        let i = pair.i;
+        let j = pair.j;
+        let peak = pair.offset;
+        let weight = pair.weight;
+
+        let sub_i = subgraph.iter().position(|&x| x == i);
+        let sub_j = subgraph.iter().position(|&x| x == j);
+        if sub_i.is_none() || sub_j.is_none() {
+            return;
+        }
+
+        let sub_i = sub_i.unwrap();
+        let sub_j = sub_j.unwrap();
+
+        let offset_i = offsets[sub_i];
+        let offset_j = offsets[sub_j];
+
+        let diff = (
+            offset_j.0 - offset_i.0 - peak.0 as f32,
+            offset_j.1 - offset_i.1 - peak.1 as f32,
+            offset_j.2 - offset_i.2 - peak.2 as f32,
+        );
+
+        //println!("Diff: {:?} I: {:?} J: {:?} O: {:?}", diff, offset_i, offset_j, peak);
+        let dst = (diff.0.powi(2) + diff.1.powi(2) + diff.2.powi(2)).sqrt();
+        mean_dst += dst;
+        max_dst = max_dst.max(dst);
+
+        let error = dst * dst * weight;
+        mean_error += error;
+
+        if error > max_error {
+            max_error = error;
+            worst_pair_index = index;
+        }
+
+        n += 1;
+    });
+
+    mean_error /= n as f32;
+    mean_dst /= n as f32;
+
+    (mean_error, max_error, mean_dst, max_dst, worst_pair_index)
 }
 
 fn to_complex_with_padding(
@@ -295,13 +437,13 @@ fn to_complex_with_padding(
     let end_z = start_z + old_depth;
 
     for z in start_z..end_z {
+        let src_z = z - start_z;
         for y in start_y..end_y {
+            let src_y = y - start_y;
             for x in start_x..end_x {
                 let src_x = x - start_x;
-                let src_y = y - start_y;
-                let src_z = z - start_z;
                 let val = image.get(src_x, src_y, src_z);
-                data[x + y * width + z * width * height] = Complex::new(val, 0.0);
+                data[x + y * width + z * width * height].re = val;
             }
         }
     }
@@ -315,8 +457,7 @@ fn get_intersection(
     image_move: &Image3D,
     layout_move: &IBox3D,
     overlap_ratio: f32,
-) -> (Image3D, IBox3D, Image3D, IBox3D)
-{
+) -> (IBox3D, IBox3D) {
     let ref_center = (
         layout_ref.x as f32 + layout_ref.width as f32 / 2.0,
         layout_ref.y as f32 + layout_ref.height as f32 / 2.0,
@@ -336,11 +477,7 @@ fn get_intersection(
     );
 
     let norm = (diff.0.powi(2) + diff.1.powi(2) + diff.2.powi(2)).sqrt();
-    let ratios = (
-        diff.0 / norm,
-        diff.1 / norm,
-        diff.2 / norm
-    );
+    let ratios = (diff.0 / norm, diff.1 / norm, diff.2 / norm);
 
     let new_norm = norm * (1.0 - overlap_ratio);
     let new_diff = (
@@ -385,7 +522,7 @@ fn get_intersection(
         new_move_max.2.min(ref_pos_max.2),
     );
 
-   //println!("Start: {:?}", start);
+    //println!("Start: {:?}", start);
     //println!("End: {:?}", end);
 
     let ref_start = (
@@ -399,7 +536,7 @@ fn get_intersection(
         start.1 - new_move_pos.1,
         start.2 - new_move_pos.2,
     );
-    
+
     let ref_end = (
         end.0 - layout_ref.x as f32,
         end.1 - layout_ref.y as f32,
@@ -413,7 +550,7 @@ fn get_intersection(
     );
 
     //println!("Ref offset: {:?}", ref_start);
-   // println!("Move offset: {:?}", move_start);
+    // println!("Move offset: {:?}", move_start);
 
     let ref_roi = (
         ref_start.0 / layout_ref.width as f32 * image_ref.width as f32,
@@ -453,16 +590,27 @@ fn get_intersection(
         move_roi.5.clamp(0.0, image_move.depth as f32).round() as i64,
     );
 
-    let ref_roi = IBox3D::new(ref_roi.0, ref_roi.1, ref_roi.2, ref_roi.3 - ref_roi.0, ref_roi.4 - ref_roi.1, ref_roi.5 - ref_roi.2);
-    let move_roi = IBox3D::new(move_roi.0, move_roi.1, move_roi.2, move_roi.3 - move_roi.0, move_roi.4 - move_roi.1, move_roi.5 - move_roi.2);
+    let ref_roi = IBox3D::new(
+        ref_roi.0,
+        ref_roi.1,
+        ref_roi.2,
+        ref_roi.3 - ref_roi.0,
+        ref_roi.4 - ref_roi.1,
+        ref_roi.5 - ref_roi.2,
+    );
+    let move_roi = IBox3D::new(
+        move_roi.0,
+        move_roi.1,
+        move_roi.2,
+        move_roi.3 - move_roi.0,
+        move_roi.4 - move_roi.1,
+        move_roi.5 - move_roi.2,
+    );
 
-    (extract_image_with_roi(image_ref, &ref_roi), ref_roi, extract_image_with_roi(image_move, &move_roi), move_roi)
+    (ref_roi, move_roi)
 }
 
-fn extract_image_with_roi(
-    image: &Image3D,
-    roi: &IBox3D,
-) -> Image3D {
+fn extract_image_with_roi(image: &Image3D, roi: &IBox3D) -> Image3D {
     let width = roi.width as usize;
     let height = roi.height as usize;
     let depth = roi.depth as usize;
@@ -478,13 +626,15 @@ fn extract_image_with_roi(
 
     for z in 0..depth {
         for y in 0..height {
-            for x in 0..width {
-                let src_x = x + roi.x as usize;
-                let src_y = y + roi.y as usize;
-                let src_z = z + roi.z as usize;
-                let val = image.get(src_x, src_y, src_z);
-                new_image.set(x, y, z, val);
-            }
+            let src_y = y + roi.y as usize;
+            let src_z = z + roi.z as usize;
+            let src_x = roi.x as usize;
+
+            new_image.data[z * width * height + y * width..z * width * height + y * width + width]
+                .copy_from_slice(
+                    &image.data[src_z * image.width * image.height + src_y * image.width + src_x
+                        ..src_z * image.width * image.height + src_y * image.width + src_x + width],
+                );
         }
     }
 
@@ -606,37 +756,32 @@ fn extract_subgraph(graph: &StitchGraph3D, subgraph_indexes: &[usize]) -> Stitch
     }
 }
 
-fn pairs_to_graph(
-    pairs: &[Pair3D],
-    num_images: usize,
-) -> StitchGraph3D {
+fn pairs_to_graph(pairs: &[Pair3D], num_images: usize) -> StitchGraph3D {
     let mut shift_x = vec![0.0; num_images * num_images];
     let mut shift_y = vec![0.0; num_images * num_images];
     let mut shift_z = vec![0.0; num_images * num_images];
     let mut adjacency_matrix = vec![0.0; num_images * num_images];
 
-    pairs
-        .iter()
-        .for_each(|pair| {
-                if pair.peaks.len() > 0 {
-                    let i = pair.i;
-                    let j = pair.j;
-                    let ij_index = i * num_images + j;
-                    let ji_index = j * num_images + i;
+    pairs.iter().for_each(|pair| {
+        if pair.valid && pair.weight > 0.0 {
+            let i = pair.i;
+            let j = pair.j;
+            let ij_index = i * num_images + j;
+            let ji_index = j * num_images + i;
 
-                    let peak = &pair.peaks[0];
-                    shift_x[ij_index] = peak.0 as f32;
-                    shift_y[ij_index] = peak.1 as f32;
-                    shift_z[ij_index] = peak.2 as f32;
+            let peak = &pair.offset;
+            shift_x[ij_index] = peak.0 as f32;
+            shift_y[ij_index] = peak.1 as f32;
+            shift_z[ij_index] = peak.2 as f32;
 
-                    shift_x[ji_index] = -peak.0 as f32;
-                    shift_y[ji_index] = -peak.1 as f32;
-                    shift_z[ji_index] = -peak.2 as f32;
+            shift_x[ji_index] = -peak.0 as f32;
+            shift_y[ji_index] = -peak.1 as f32;
+            shift_z[ji_index] = -peak.2 as f32;
 
-                    adjacency_matrix[ij_index] = 1.0;
-                    adjacency_matrix[ji_index] = 1.0;
-                }
-        });
+            adjacency_matrix[ij_index] = 1.0;
+            adjacency_matrix[ji_index] = 1.0;
+        }
+    });
 
     StitchGraph3D {
         shift_x,
@@ -668,7 +813,7 @@ fn find_subgraphs(graph: &StitchGraph3D) -> Vec<Vec<usize>> {
             subgraph.push(node);
 
             for j in 0..graph.num_nodes {
-                if graph.adjacency_matrix[node * graph.num_nodes + j] == 1.0 {
+                if graph.adjacency_matrix[node * graph.num_nodes + j] != 0.0 {
                     stack.push(j);
                 }
             }
@@ -734,10 +879,7 @@ fn solve_linear_system(a: &[f32], b: &[f32], size: usize) -> Vec<f32> {
     x
 }
 
-fn create_overlap_map(
-    images: &[Image3DFile],
-    layout: &[IBox3D],
-) -> Vec<Vec<usize>> {
+fn create_overlap_map(images: &[Image3DFile], layout: &[IBox3D]) -> Vec<Vec<usize>> {
     (0..images.len())
         .map(|i| {
             let mut overlapping = vec![];
@@ -815,6 +957,82 @@ fn fft_3d<T: FftNum>(
     img_buffer
         .chunks_exact_mut(num_frames)
         .for_each(|frame| fft_frames.process_with_scratch(frame, &mut scratch));
+}
+
+fn fft_3d_par<T: FftNum>(
+    width: usize,
+    height: usize,
+    num_frames: usize,
+    img_buffer: &mut [Complex<T>],
+    direction: rustfft::FftDirection,
+) {
+    // Compute the FFT of each row of the image.
+    let mut other = vec![Complex::zero(); img_buffer.len()];
+
+    img_buffer
+        .par_chunks_exact_mut(width * height)
+        .zip(other.par_chunks_exact_mut(width * height))
+        .for_each(|(input, output)| {
+            let mut planner = FftPlanner::new();
+            let fft_width = planner.plan_fft(width, direction);
+            let mut scratch = vec![Complex::zero(); fft_width.get_outofplace_scratch_len()];
+            input
+                .chunks_exact_mut(width)
+                .zip(output.chunks_exact_mut(width))
+                .for_each(|(input, output)| {
+                    fft_width.process_outofplace_with_scratch(input, output, &mut scratch);
+                });
+        });
+
+    // Transpose the image to be able to compute the FFT on the other dimension.
+    let frame_size = width * height;
+    img_buffer
+        .par_chunks_exact_mut(frame_size)
+        .zip(other.par_chunks_exact(frame_size))
+        .for_each(|(output, input)| {
+            transpose(input, output, width, height);
+        });
+
+    // Compute the FFT of each column of the image.
+    img_buffer
+        .par_chunks_exact_mut(width * height)
+        .zip(other.par_chunks_exact_mut(width * height))
+        .for_each(|(input, output)| {
+            let mut planner = FftPlanner::new();
+            let fft_width = planner.plan_fft(height, direction);
+            let mut scratch = vec![Complex::zero(); fft_width.get_outofplace_scratch_len()];
+            input
+                .chunks_exact_mut(height)
+                .zip(output.chunks_exact_mut(height))
+                .for_each(|(input, output)| {
+                    fft_width.process_outofplace_with_scratch(input, output, &mut scratch);
+                });
+        });
+
+    // Transpose the image to be able to compute the FFT on the num_frames dimension.
+    img_buffer
+        .par_chunks_exact_mut(num_frames * height)
+        .enumerate()
+        .for_each(|(x, frame)| {
+            for y in 0..height {
+                for i in 0..num_frames {
+                    frame[y * num_frames + i] = other[i * width * height + x * height + y];
+                }
+            }
+        });
+
+    // Compute the FFT of each frame of the image.
+    img_buffer
+        .par_chunks_exact_mut(num_frames * height)
+        .for_each(|frame| {
+            let mut planner = FftPlanner::new();
+            let fft_frames = planner.plan_fft(num_frames, direction);
+            let mut scratch = vec![Complex::zero(); fft_frames.get_inplace_scratch_len()];
+
+            frame.chunks_exact_mut(num_frames).for_each(|frame| {
+                fft_frames.process_with_scratch(frame, &mut scratch);
+            });
+        });
 }
 
 fn find_peaks_3d(image: &Image3D, check_peaks: usize) -> Vec<(i64, i64, i64, f32)> {

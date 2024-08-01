@@ -1,5 +1,6 @@
 use std::sync::Mutex;
 
+use dicom::core::chrono::offset;
 use rayon::prelude::*;
 use rustfft::{num_complex::Complex, num_traits::Zero, FftNum, FftPlanner};
 use serde::{Deserialize, Serialize};
@@ -76,7 +77,9 @@ pub struct Stitch2DResult {
 pub struct Pair2D {
     pub i: usize,
     pub j: usize,
-    pub peaks: Vec<(i64, i64, f32)>,
+    pub offset: (i64, i64),
+    pub weight: f32,
+    pub valid: bool,
 }
 
 #[allow(dead_code)]
@@ -86,6 +89,8 @@ pub fn stitch(
     overlap_ratio: f32,
     check_peaks: usize,
     correlation_threshold: f32,
+    relative_error_threshold: f32,
+    absolute_error_threshold: f32,
     dimension_mask: (bool, bool),
 ) -> Stitch2DResult {
     let mut overlap_map = create_overlap_map(images, layout);
@@ -101,7 +106,7 @@ pub fn stitch(
     let todo: usize = overlap_map.iter().map(|x| x.len()).sum();
     let done = Mutex::new(0);
 
-    let pairs: Vec<Pair2D> = overlap_map
+    let mut pairs: Vec<Pair2D> = overlap_map
         .par_iter()
         .enumerate()
         .flat_map(|(i, overlap_list)| {
@@ -211,30 +216,145 @@ pub fn stitch(
 
                     let mut done2 = done.lock().unwrap();
                     *done2 += 1;
-                    println!("Progress: {}/{}", *done2, todo);
+                    println!(
+                        "Progress {}/{}: {} - {} {:?}",
+                        *done2,
+                        todo,
+                        i,
+                        j,
+                        peaks.first().unwrap_or(&(0, 0, 0.0))
+                    );
 
-                    Pair2D { i, j, peaks }
+                    Pair2D {
+                        i,
+                        j,
+                        offset: peaks.first().map(|x| (x.0, x.1)).unwrap_or((0, 0)),
+                        weight: peaks.first().map(|x| x.2).unwrap_or(0.0),
+                        valid: peaks.len() > 0,
+                    }
                 })
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
 
     println!("Global optimization");
-    let graph = pairs_to_graph(&pairs, images.len());
-    let subgraphs = find_subgraphs(&graph);
-    let offsets = subgraphs
-        .iter()
-        .map(|subgraph_indexes| {
-            let subgraph = extract_subgraph(&graph, subgraph_indexes);
-            calculate_offsets_from_graph(&subgraph)
-        })
-        .collect::<Vec<_>>();
+    let mut offsets;
+    let mut subgraphs;
+    loop {
+        let graph = pairs_to_graph(&pairs, images.len());
+        subgraphs = find_subgraphs(&graph);
+
+        let mut redo = false;
+        offsets = subgraphs
+            .iter()
+            .map(|subgraph_indexes| {
+                let subgraph = extract_subgraph(&graph, subgraph_indexes);
+                calculate_offsets_from_graph(&subgraph)
+            })
+            .collect::<Vec<_>>();
+
+        for (i, subgraph) in subgraphs.iter().enumerate() {
+            let (mean_error, max_error, mean_dst, max_dst, worst_pair_index) =
+                check_offsets(&pairs, subgraph, &offsets[i]);
+
+            println!(
+                "Subgraph {} - N: {} Mean error: {} Max error: {} Mean dst: {} Max dst: {}",
+                i,
+                subgraph.len(),
+                mean_error,
+                max_error,
+                mean_dst,
+                max_dst
+            );
+
+            if (mean_error * relative_error_threshold < max_error && max_error > 0.95)
+                || mean_error > absolute_error_threshold
+            {
+                let worst_pair = &mut pairs[worst_pair_index];
+                println!(
+                    "Identified worst pair: {} - {} Offset: {:?} R: {} Error: {}",
+                    worst_pair.i, worst_pair.j, worst_pair.offset, worst_pair.weight, max_error
+                );
+
+                worst_pair.valid = false;
+
+                redo = true;
+                break;
+            }
+        }
+
+        if !redo {
+            break;
+        }
+
+        println!("Redoing optimization");
+    }
 
     Stitch2DResult {
         pairs,
         subgraphs,
         offsets,
     }
+}
+
+
+fn check_offsets(
+    pairs: &[Pair2D],
+    subgraph: &[usize],
+    offsets: &[(f32, f32)],
+) -> (f32, f32, f32, f32, usize) {
+    let mut mean_error: f32 = 0.0;
+    let mut max_error: f32 = 0.0;
+    let mut mean_dst: f32 = 0.0;
+    let mut max_dst: f32 = 0.0;
+    let mut worst_pair_index = 0;
+
+    let mut n = 0;
+    pairs.iter().enumerate().for_each(|(index, pair)| {
+        if !pair.valid {
+            return;
+        }
+        let i = pair.i;
+        let j = pair.j;
+        let peak = pair.offset;
+        let weight = pair.weight;
+
+        let sub_i = subgraph.iter().position(|&x| x == i);
+        let sub_j = subgraph.iter().position(|&x| x == j);
+        if sub_i.is_none() || sub_j.is_none() {
+            return;
+        }
+
+        let sub_i = sub_i.unwrap();
+        let sub_j = sub_j.unwrap();
+
+        let offset_i = offsets[sub_i];
+        let offset_j = offsets[sub_j];
+
+        let diff = (
+            offset_j.0 - offset_i.0 - peak.0 as f32,
+            offset_j.1 - offset_i.1 - peak.1 as f32,
+        );
+
+        let dst = (diff.0.powi(2) + diff.1.powi(2)).sqrt();
+        mean_dst += dst;
+        max_dst = max_dst.max(dst);
+
+        let error = dst * dst * weight;
+        mean_error += error;
+
+        if error > max_error {
+            max_error = error;
+            worst_pair_index = index;
+        }
+
+        n += 1;
+    });
+
+    mean_error /= n as f32;
+    mean_dst /= n as f32;
+
+    (mean_error, max_error, mean_dst, max_dst, worst_pair_index)
 }
 
 fn to_complex_with_padding(image: &Image2D, width: usize, height: usize) -> Vec<Complex<f32>> {
@@ -502,18 +622,17 @@ fn pairs_to_graph(pairs: &[Pair2D], num_images: usize) -> StitchGraph2D {
     let mut adjacency_matrix = vec![0.0; num_images * num_images];
 
     pairs.iter().for_each(|pair| {
-        let peaks = &pair.peaks;
-        if peaks.len() > 0 {
+        if pair.valid && pair.weight > 0.0 {
             let i = pair.i;
             let j = pair.j;
             let ij_index = i * num_images + j;
             let ji_index = j * num_images + i;
 
-            shift_x[ij_index] = peaks[0].0 as f32;
-            shift_y[ij_index] = peaks[0].1 as f32;
-
-            shift_x[ji_index] = -peaks[0].0 as f32;
-            shift_y[ji_index] = -peaks[0].1 as f32;
+            let offset = &pair.offset;
+            shift_x[ij_index] = offset.0 as f32;
+            shift_y[ij_index] = offset.1 as f32;
+            shift_x[ji_index] = -offset.0 as f32;
+            shift_y[ji_index] = -offset.1 as f32;
 
             adjacency_matrix[ij_index] = 1.0;
             adjacency_matrix[ji_index] = 1.0;

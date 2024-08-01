@@ -4,7 +4,7 @@ use crate::image::*;
 
 const DO_SUBPIXEL: bool = true;
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum FuseMode {
     Average,
     Min,
@@ -194,7 +194,9 @@ pub fn fuse_3d(
 
     let mut new_image: Vec<u8> = vec![0; (width * height * depth) as usize];
     for i in 0..num_images {
-        let image = images[subgraph_indexes[i]].get_image();
+        let imgfile = &images[subgraph_indexes[i]];
+        let image = imgfile.get_image();
+
         let offset = offsets[i];
         let offset_i = (offset.0.floor(), offset.1.floor(), offset.2.floor());
         let offset_f = (
