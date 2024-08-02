@@ -390,6 +390,8 @@ fn stitch_3d(
     println!("Copying files to temp directory...");
     let temp_dir = std::env::temp_dir();
     let temp_dir = temp_dir.join("stitch3d");
+    let random: u32 = rand::random();
+    let temp_dir = temp_dir.join(format!("temp_{}", random));
     if !temp_dir.exists() {
         std::fs::create_dir_all(&temp_dir).unwrap();
     }

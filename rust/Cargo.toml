@@ -7,6 +7,7 @@ edition = "2021"
 dicom = "0.7.0"
 egui = "0.28.1"
 fft2d = "0.1.1"
+rand = "0.8.5"
 rayon = "1.10.0"
 rustfft = "6.2.0"
 serde = { version = "1.0.204", features = ["derive"] }
