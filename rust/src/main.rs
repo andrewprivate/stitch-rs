@@ -396,13 +396,13 @@ fn stitch_3d(
         std::fs::create_dir_all(&temp_dir).unwrap();
     }
 
-    let mut temp_paths = vec![];
-    for path in &config.tile_paths {
-        let file_name = path.file_name().unwrap();
-        let temp_path = temp_dir.join(file_name);
-        std::fs::copy(path, temp_path.clone()).unwrap();
-        temp_paths.push(temp_path);
-    }
+    let temp_paths = 
+        config.tile_paths.par_iter().map(|path| {
+            let file_name = path.file_name().unwrap();
+            let temp_path = temp_dir.join(file_name);
+            std::fs::copy(path, temp_path.clone()).unwrap();
+            temp_path
+        }).collect::<Vec<_>>();
 
     println!("Reading files for size information...");
     let start = std::time::Instant::now();
