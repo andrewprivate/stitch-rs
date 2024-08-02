@@ -387,10 +387,25 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
 fn stitch_3d(
     config: StitchConfig,
 ) {
+    println!("Copying files to temp directory...");
+    let temp_dir = std::env::temp_dir();
+    let temp_dir = temp_dir.join("stitch3d");
+    if !temp_dir.exists() {
+        std::fs::create_dir_all(&temp_dir).unwrap();
+    }
+
+    let mut temp_paths = vec![];
+    for path in &config.tile_paths {
+        let file_name = path.file_name().unwrap();
+        let temp_path = temp_dir.join(file_name);
+        std::fs::copy(path, temp_path.clone()).unwrap();
+        temp_paths.push(temp_path);
+    }
+
     println!("Reading files for size information...");
     let start = std::time::Instant::now();
-    let images = config
-        .tile_paths
+    let images =
+        temp_paths
         .into_par_iter()
         .map(|path| {
             // Check if it exists
@@ -476,6 +491,9 @@ fn stitch_3d(
         });
 
     println!("Time to fuse images: {:?}", start.elapsed());
+
+    // Delete temp directory
+    std::fs::remove_dir_all(temp_dir).unwrap();
 }
 
 fn stitch_2d(
