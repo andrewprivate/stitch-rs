@@ -856,21 +856,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust"
-version = "0.1.0"
-dependencies = [
- "dicom",
- "egui",
- "fft2d",
- "rayon",
- "rustfft",
- "serde",
- "serde_json",
- "tiff",
- "transpose",
-]
-
-[[package]]
 name = "rustfft"
 version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -988,6 +973,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 dependencies = [
  "lock_api",
+]
+
+[[package]]
+name = "stitch"
+version = "0.1.0"
+dependencies = [
+ "dicom",
+ "egui",
+ "fft2d",
+ "rayon",
+ "rustfft",
+ "serde",
+ "serde_json",
+ "tiff",
+ "transpose",
 ]
 
 [[package]]
