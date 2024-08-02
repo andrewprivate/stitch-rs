@@ -95,7 +95,7 @@ pub struct Stitch3DResult {
 pub fn stitch(
     images: &[Image3DFile],
     layout: &[IBox3D],
-    overlap_ratio: f32,
+    overlap_ratio: (f32, f32, f32),
     check_peaks: usize,
     correlation_threshold: f32,
     relative_error_threshold: f32,
@@ -456,7 +456,7 @@ fn get_intersection(
     layout_ref: &IBox3D,
     image_move: &Image3D,
     layout_move: &IBox3D,
-    overlap_ratio: f32,
+    overlap_ratio: (f32, f32, f32),
 ) -> (IBox3D, IBox3D) {
     let ref_center = (
         layout_ref.x as f32 + layout_ref.width as f32 / 2.0,
@@ -476,14 +476,10 @@ fn get_intersection(
         move_center.2 - ref_center.2,
     );
 
-    let norm = (diff.0.powi(2) + diff.1.powi(2) + diff.2.powi(2)).sqrt();
-    let ratios = (diff.0 / norm, diff.1 / norm, diff.2 / norm);
-
-    let new_norm = norm * (1.0 - overlap_ratio);
     let new_diff = (
-        ratios.0 * new_norm,
-        ratios.1 * new_norm,
-        ratios.2 * new_norm,
+        diff.0 * (1.0 - overlap_ratio.0),
+        diff.1 * (1.0 - overlap_ratio.1),
+        diff.2 * (1.0 - overlap_ratio.2),
     );
 
     let new_center = (

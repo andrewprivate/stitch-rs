@@ -86,7 +86,7 @@ pub struct Pair2D {
 pub fn stitch(
     images: &[Image2D],
     layout: &[IBox2D],
-    overlap_ratio: f32,
+    overlap_ratio: (f32, f32),
     check_peaks: usize,
     correlation_threshold: f32,
     relative_error_threshold: f32,
@@ -384,7 +384,7 @@ fn get_intersection(
     layout_ref: &IBox2D,
     image_move: &Image2D,
     layout_move: &IBox2D,
-    overlap_ratio: f32,
+    overlap_ratio: (f32, f32)
 ) -> (Image2D, IBox2D, Image2D, IBox2D) {
     let ref_center = (
         layout_ref.x as f32 + layout_ref.width as f32 / 2.0,
@@ -398,11 +398,7 @@ fn get_intersection(
 
     let diff = (move_center.0 - ref_center.0, move_center.1 - ref_center.1);
 
-    let norm = (diff.0.powi(2) + diff.1.powi(2)).sqrt();
-    let ratios = (diff.0 / norm, diff.1 / norm);
-
-    let new_norm = norm * (1.0 - overlap_ratio);
-    let new_diff = (ratios.0 * new_norm, ratios.1 * new_norm);
+    let new_diff = (diff.0 * (1.0 - overlap_ratio.0), diff.1 * (1.0 - overlap_ratio.1));
 
     let new_center = (ref_center.0 + new_diff.0, ref_center.1 + new_diff.1);
 

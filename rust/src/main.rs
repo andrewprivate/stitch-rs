@@ -67,7 +67,7 @@ fn main() {
 pub struct StitchConfig {
     pub version: String,
     pub mode: StitchMode,
-    pub overlap_ratio: f32,
+    pub overlap_ratio: (f32, f32, f32),
     pub correlation_threshold: f32,
     pub relative_error_threshold: f32,
     pub absolute_error_threshold: f32,
@@ -86,7 +86,7 @@ impl StitchConfig {
         StitchConfig {
             version: "1.0".to_string(),
             mode: StitchMode::TwoD,
-            overlap_ratio: 0.2,
+            overlap_ratio: (0.2, 0.2, 0.2),
             correlation_threshold: 0.3,
             relative_error_threshold: 2.5,
             absolute_error_threshold: 3.5,
@@ -138,8 +138,25 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
 
     // Check overlap ratio
     if !json.get("overlap_ratio").is_none() {
-        config.overlap_ratio = json["overlap_ratio"].as_f64().unwrap() as f32;
-        println!("Overlap ratio: {}", config.overlap_ratio);
+        // Check if single value or array
+        if json["overlap_ratio"].is_array() {
+            let arr = json["overlap_ratio"].as_array().unwrap();
+            if arr.len() == 2 {
+                config.overlap_ratio.0 = arr[0].as_f64().unwrap() as f32;
+                config.overlap_ratio.1 = arr[1].as_f64().unwrap() as f32;
+            } else if arr.len() == 3 {
+                config.overlap_ratio.0 = arr[0].as_f64().unwrap() as f32;
+                config.overlap_ratio.1 = arr[1].as_f64().unwrap() as f32;
+                config.overlap_ratio.2 = arr[2].as_f64().unwrap() as f32;
+            } else {
+                panic!("Invalid overlap ratio");
+            }
+        } else {
+            let val = json["overlap_ratio"].as_f64().unwrap() as f32;
+            config.overlap_ratio = (val, val, val);
+        }
+
+        println!("Overlap ratio: {:?}", config.overlap_ratio);
     }
 
     // Check correlation threshold
@@ -376,6 +393,10 @@ fn stitch_3d(
         .tile_paths
         .into_par_iter()
         .map(|path| {
+            // Check if it exists
+            if !path.exists() {
+                panic!("File does not exist: {:?}", path);
+            }
             if path.extension().unwrap() == "dcm" {
                 read_dcm_headers(&path)
             } else {
@@ -466,6 +487,9 @@ fn stitch_2d(
         .tile_paths
         .into_par_iter()
         .map(|path| {
+            if !path.exists() {
+                panic!("File does not exist: {:?}", path);
+            }
             let ext = path.extension().unwrap().to_str().unwrap();
             let image = if ext == "tiff" {
                 read_tiff(path.as_path())
@@ -510,7 +534,7 @@ fn stitch_2d(
         let result = stitch2d::stitch(
             &images,
             &tile_layout,
-            config.overlap_ratio,
+            (config.overlap_ratio.0, config.overlap_ratio.1),
             config.check_peaks,
             config.correlation_threshold,
             config.relative_error_threshold,
