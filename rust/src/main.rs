@@ -120,7 +120,7 @@ impl StitchConfig {
             absolute_error_threshold: 3.5,
             check_peaks: 5,
             dimension_mask: (true, true, true),
-            fuse_mode: FuseMode::Average,
+            fuse_mode: FuseMode::Linear,
             no_fuse: false,
             output_path: PathBuf::new(),
             alignment_file: None,
