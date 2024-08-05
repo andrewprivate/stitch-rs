@@ -6,10 +6,25 @@ const DO_SUBPIXEL: bool = true;
 
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum FuseMode {
+    Linear,
     Average,
     Min,
     Max,
-    Overwrite,
+    Overwrite
+}
+
+pub fn get_linear_weight_3d(
+    dim: (usize, usize, usize),
+    offset: (usize, usize, usize),
+    alpha: f32,
+) -> f32 {
+    let mut minDistance = 1.0;
+    minDistance *= (offset.0.min(dim.0 - offset.0 - 1) + 1) as f32;
+    minDistance *= (offset.1.min(dim.1 - offset.1 - 1) + 1) as f32;
+    minDistance *= (offset.2.min(dim.2 - offset.2 - 1) + 1) as f32;
+
+    minDistance += 1.0;
+    return alpha.powf(minDistance);
 }
 
 pub fn fuse_2d(
@@ -101,6 +116,9 @@ pub fn fuse_2d(
                     FuseMode::Overwrite => {
                         new_image[index] = val;
                     }
+                    FuseMode::Linear => {
+                        println!("Linear mode not implemented for 2D images");
+                    }
                 }
             }
         }
@@ -125,12 +143,47 @@ pub fn fuse_2d(
     }
 }
 
-pub fn fuse_3d(
+pub fn calc_iter_bounds(
+    tile_pos: (f32, f32, f32),
+    tile_dim: (usize, usize, usize),
+    dim: (usize, usize, usize),
+) -> (
+    i64,
+    i64,
+    i64,
+    i64,
+    i64,
+    i64,
+    (i64, i64, i64),
+    (f32, f32, f32)
+) {
+    let offset_i = (tile_pos.0.floor(), tile_pos.1.floor(), tile_pos.2.floor());
+    let offset_f = (
+        tile_pos.0 - offset_i.0,
+        tile_pos.1 - offset_i.1,
+        tile_pos.2 - offset_i.2,
+    );
+
+    let offset_i = (offset_i.0 as i64, offset_i.1 as i64, offset_i.2 as i64);
+    let offset_fi = (1.0 - offset_f.0, 1.0 - offset_f.1, 1.0 - offset_f.2);
+
+    let start_x = offset_i.0.max(0);
+    let start_y = offset_i.1.max(0);
+    let start_z = offset_i.2.max(0);
+    let end_x = (offset_i.0 + tile_dim.0 as i64).min(dim.0 as i64);
+    let end_y = (offset_i.1 + tile_dim.1 as i64).min(dim.1 as i64);
+    let end_z = (offset_i.2 + tile_dim.2 as i64).min(dim.2 as i64);
+
+    (
+        start_x, start_y, start_z, end_x, end_y, end_z, offset_i, offset_f
+    )
+}
+
+pub fn calc_new_dim(
     images: &[Image3DFile],
     subgraph_indexes: &[usize],
     offsets: &[(f32, f32, f32)],
-    mode: FuseMode,
-) -> Image3D8 {
+) -> (usize, usize, usize, f32, f32) {
     let num_images: usize = subgraph_indexes.len();
 
     // Find width and height and depth of new image
@@ -162,125 +215,165 @@ pub fn fuse_3d(
         max = image.max.max(max);
     }
 
+    (width as usize, height as usize, depth as usize, min, max)
+}
+
+pub fn get_val(
+    src_pos: (usize, usize, usize),
+    offset_f: (f32, f32, f32),
+    image: &Image3D,
+) -> f32 {
+    let src_x = src_pos.0;
+    let src_y = src_pos.1;
+    let src_z = src_pos.2;
+    let offset_fi = (1.0 - offset_f.0, 1.0 - offset_f.1, 1.0 - offset_f.2);
+    let mut val = 0.0;
+    if DO_SUBPIXEL {
+        val += image.get(src_x, src_y, src_z)
+            * offset_fi.0
+            * offset_fi.1
+            * offset_fi.2;
+
+        let prev_x = if src_x > 0 {
+            src_x - 1
+        } else {
+            1.min(image.width - 1) as usize
+        };
+        let prev_y = if src_y > 0 {
+            src_y - 1
+        } else {
+            1.min(image.height - 1) as usize
+        };
+        let prev_z = if src_z > 0 {
+            src_z - 1
+        } else {
+            1.min(image.depth - 1) as usize
+        };
+        val += image.get(prev_x, src_y, src_z)
+            * offset_f.0
+            * offset_fi.1
+            * offset_fi.2;
+        val += image.get(src_x, prev_y, src_z)
+            * offset_fi.0
+            * offset_f.1
+            * offset_fi.2;
+        val += image.get(src_x, src_y, prev_z)
+            * offset_fi.0
+            * offset_fi.1
+            * offset_f.2;
+        val += image.get(prev_x, prev_y, src_z)
+            * offset_f.0
+            * offset_f.1
+            * offset_fi.2;
+        val += image.get(prev_x, src_y, prev_z)
+            * offset_f.0
+            * offset_fi.1
+            * offset_f.2;
+        val += image.get(src_x, prev_y, prev_z)
+            * offset_fi.0
+            * offset_f.1
+            * offset_f.2;
+        val += image.get(prev_x, prev_y, prev_z)
+            * offset_f.0
+            * offset_f.1
+            * offset_f.2;
+    } else {
+        val = image.get(src_x, src_y, src_z);
+    }
+
+    val
+}
+pub fn fuse_3d(
+    images: &[Image3DFile],
+    subgraph_indexes: &[usize],
+    offsets: &[(f32, f32, f32)],
+    mode: FuseMode,
+) -> Image3D8 {
+    let num_images: usize = subgraph_indexes.len();
+    let (width, height, depth, min, max) = calc_new_dim(images, subgraph_indexes, offsets);
+
+    let alpha = 1.5;
     println!("Fusing image {} x {} x {}", width, height, depth);
     let mut new_image_counts: Vec<u8> = vec![];
+    let mut new_image_weights: Vec<f32> = vec![];
     if mode == FuseMode::Average {
         new_image_counts = vec![0; (width * height * depth) as usize];
 
         for i in 0..num_images {
             let image = &images[subgraph_indexes[i]];
-            let offset = offsets[i];
-            let offset_i = (offset.0.floor(), offset.1.floor(), offset.2.floor());
-            let offset_i = (offset_i.0 as i64, offset_i.1 as i64, offset_i.2 as i64);
-
-            let start_x = offset_i.0.max(0);
-            let start_y = offset_i.1.max(0);
-            let start_z = offset_i.2.max(0);
-            let end_x = (offset_i.0 + image.width as i64).min(width as i64);
-            let end_y = (offset_i.1 + image.height as i64).min(height as i64);
-            let end_z = (offset_i.2 + image.depth as i64).min(depth as i64);
+            let (start_x, start_y, start_z, end_x, end_y, end_z, offset_i, offset_f) =
+                calc_iter_bounds(
+                    offsets[i],
+                    (image.width, image.height, image.depth),
+                    (width, height, depth),
+                );
 
             for z in start_z..end_z {
                 for y in start_y..end_y {
                     for x in start_x..end_x {
-                        let index = (x + y * width + z * width * height) as usize;
+                        let index =
+                            (x + y * width as i64 + z * width as i64 * height as i64) as usize;
                         new_image_counts[index] += 1;
+                    }
+                }
+            }
+        }
+    } else if mode == FuseMode::Linear {
+        new_image_weights = vec![0.0; (width * height * depth) as usize];
+        for i in 0..num_images {
+            let image = &images[subgraph_indexes[i]];
+            let (start_x, start_y, start_z, end_x, end_y, end_z, offset_i, offset_f) =
+                calc_iter_bounds(
+                    offsets[i],
+                    (image.width, image.height, image.depth),
+                    (width, height, depth),
+                );
+
+            for z in start_z..end_z {
+                for y in start_y..end_y {
+                    for x in start_x..end_x {
+                        let index =
+                            (x + y * width as i64 + z * width as i64 * height as i64) as usize;
+                        new_image_weights[index] += get_linear_weight_3d(
+                            (width, height, depth),
+                            ((x - offset_i.0) as usize, (y - offset_i.1) as usize, (z - offset_i.2) as usize),
+                            alpha,
+                        );
                     }
                 }
             }
         }
     }
 
-
     let mut new_image: Vec<u8> = vec![0; (width * height * depth) as usize];
     for i in 0..num_images {
         let imgfile = &images[subgraph_indexes[i]];
         let image = imgfile.get_image();
-
-        let offset = offsets[i];
-        let offset_i = (offset.0.floor(), offset.1.floor(), offset.2.floor());
-        let offset_f = (
-            offset.0 - offset_i.0,
-            offset.1 - offset_i.1,
-            offset.2 - offset_i.2,
-        );
-        let offset_i = (offset_i.0 as i64, offset_i.1 as i64, offset_i.2 as i64);
-        let offset_fi = (1.0 - offset_f.0, 1.0 - offset_f.1, 1.0 - offset_f.2);
-
-        let start_x = offset_i.0.max(0);
-        let start_y = offset_i.1.max(0);
-        let start_z = offset_i.2.max(0);
-        let end_x = (offset_i.0 + image.width as i64).min(width as i64);
-        let end_y = (offset_i.1 + image.height as i64).min(height as i64);
-        let end_z = (offset_i.2 + image.depth as i64).min(depth as i64);
+        let (start_x, start_y, start_z, end_x, end_y, end_z, offset_i,offset_f) =
+            calc_iter_bounds(
+                offsets[i],
+                (image.width, image.height, image.depth),
+                (width, height, depth),
+            );
 
         for z in start_z..end_z {
             for y in start_y..end_y {
                 for x in start_x..end_x {
-                    let src_x = (x - offset_i.0) as usize;
-                    let src_y = (y - offset_i.1) as usize;
-                    let src_z = (z - offset_i.2) as usize;
-
-                    let mut val = 0.0;
-                    if DO_SUBPIXEL {
-                        val += image.get(src_x, src_y, src_z)
-                            * offset_fi.0
-                            * offset_fi.1
-                            * offset_fi.2;
-
-                        let prev_x = if src_x > 0 {
-                            src_x - 1
-                        } else {
-                            1.min(width - 1) as usize
-                        };
-                        let prev_y = if src_y > 0 {
-                            src_y - 1
-                        } else {
-                            1.min(height - 1) as usize
-                        };
-                        let prev_z = if src_z > 0 {
-                            src_z - 1
-                        } else {
-                            1.min(depth - 1) as usize
-                        };
-                        val += image.get(prev_x, src_y, src_z)
-                            * offset_f.0
-                            * offset_fi.1
-                            * offset_fi.2;
-                        val += image.get(src_x, prev_y, src_z)
-                            * offset_fi.0
-                            * offset_f.1
-                            * offset_fi.2;
-                        val += image.get(src_x, src_y, prev_z)
-                            * offset_fi.0
-                            * offset_fi.1
-                            * offset_f.2;
-                        val += image.get(prev_x, prev_y, src_z)
-                            * offset_f.0
-                            * offset_f.1
-                            * offset_fi.2;
-                        val += image.get(prev_x, src_y, prev_z)
-                            * offset_f.0
-                            * offset_fi.1
-                            * offset_f.2;
-                        val += image.get(src_x, prev_y, prev_z)
-                            * offset_fi.0
-                            * offset_f.1
-                            * offset_f.2;
-                        val += image.get(prev_x, prev_y, prev_z)
-                            * offset_f.0
-                            * offset_f.1
-                            * offset_f.2;
-                    } else {
-                        val = image.get(src_x, src_y, src_z);
-                    }
-
-                    let index = (x + y * width + z * width * height) as usize;
-
+                    let index = (x + y * width as i64 + z * width as i64 * height as i64) as usize;
+                    let val = get_val(
+                        (
+                            (x - offset_i.0) as usize,
+                            (y - offset_i.1) as usize,
+                            (z - offset_i.2) as usize,
+                        ),
+                        offset_f,
+                        &image,
+                    );
                     let val = ((val - min) / (max - min) * 255.0).clamp(0.0, 255.0) as u8;
                     match mode {
                         FuseMode::Average => {
-                            new_image[index] = new_image[index].saturating_add(val / new_image_counts[index]);
+                            new_image[index] =
+                                new_image[index].saturating_add(val / new_image_counts[index]);
                         }
                         FuseMode::Max => {
                             new_image[index] = new_image[index].max(val);
@@ -290,6 +383,15 @@ pub fn fuse_3d(
                         }
                         FuseMode::Overwrite => {
                             new_image[index] = val;
+                        }
+                        FuseMode::Linear => {
+                            new_image[index] = new_image[index].saturating_add(
+                                (val as f32 * get_linear_weight_3d(
+                                    (width, height, depth),
+                                    ((x - offset_i.0) as usize, (y - offset_i.1) as usize, (z - offset_i.2) as usize),
+                                    alpha,
+                                ) / new_image_weights[index]) as u8
+                            );
                         }
                     }
                 }
@@ -306,6 +408,6 @@ pub fn fuse_3d(
         width: width as usize,
         height: height as usize,
         depth: depth as usize,
-        data: new_image
+        data: new_image,
     }
 }

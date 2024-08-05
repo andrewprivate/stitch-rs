@@ -79,6 +79,7 @@ pub struct StitchConfig {
     pub alignment_file: Option<PathBuf>,
     pub tile_paths: Vec<PathBuf>,
     pub tile_layout: Vec<IBox3D>,
+    pub copy_files: bool,
 }
 
 impl StitchConfig {
@@ -98,6 +99,7 @@ impl StitchConfig {
             alignment_file: None,
             tile_paths: vec![],
             tile_layout: vec![],
+            copy_files: false,
         }
     }
 }
@@ -208,6 +210,9 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
             }
             "overwrite" => {
                 config.fuse_mode = FuseMode::Overwrite;
+            }
+            "linear" => {
+                config.fuse_mode = FuseMode::Linear;
             }
             _ => {
                 panic!("Invalid fuse mode");
@@ -387,27 +392,30 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
 fn stitch_3d(
     config: StitchConfig,
 ) {
+    let mut tile_paths = config.tile_paths.clone();
+    let mut temp_dir = PathBuf::new();
+    if config.copy_files {
     println!("Copying files to temp directory...");
-    let temp_dir = std::env::temp_dir();
-    let temp_dir = temp_dir.join("stitch3d");
+    temp_dir = std::env::temp_dir();
+    temp_dir = temp_dir.join("stitch3d");
     let random: u32 = rand::random();
-    let temp_dir = temp_dir.join(format!("temp_{}", random));
+    temp_dir = temp_dir.join(format!("temp_{}", random));
     if !temp_dir.exists() {
         std::fs::create_dir_all(&temp_dir).unwrap();
     }
 
-    let temp_paths = 
-        config.tile_paths.par_iter().map(|path| {
+    tile_paths = 
+        tile_paths.par_iter().map(|path| {
             let file_name = path.file_name().unwrap();
             let temp_path = temp_dir.join(file_name);
             std::fs::copy(path, temp_path.clone()).unwrap();
             temp_path
         }).collect::<Vec<_>>();
-
+    }
     println!("Reading files for size information...");
     let start = std::time::Instant::now();
     let images =
-        temp_paths
+        tile_paths
         .into_par_iter()
         .map(|path| {
             // Check if it exists
@@ -494,8 +502,10 @@ fn stitch_3d(
 
     println!("Time to fuse images: {:?}", start.elapsed());
 
-    // Delete temp directory
-    std::fs::remove_dir_all(temp_dir).unwrap();
+    if config.copy_files {
+        // Delete temp directory
+        std::fs::remove_dir_all(temp_dir).unwrap();
+    }
 }
 
 fn stitch_2d(
