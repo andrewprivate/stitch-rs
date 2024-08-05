@@ -363,6 +363,7 @@ pub fn fuse_3d(
                 .par_chunks_mut(width * height)
                 .enumerate()
                 .for_each(|(z, chunk)| {
+                    let z = z as i64 + start_z;
                     for y in start_y..end_y {
                         for x in start_x..end_x {
                             let index = (x + y * width as i64) as usize;
@@ -387,6 +388,7 @@ pub fn fuse_3d(
                 .par_chunks_mut(width * height)
                 .enumerate()
                 .for_each(|(z, chunk)| {
+                    let z = z as i64 + start_z;
                     for y in start_y..end_y {
                         for x in start_x..end_x {
                             let index = (x + y * width as i64) as usize;
@@ -410,6 +412,7 @@ pub fn fuse_3d(
                 .par_chunks_mut(width * height)
                 .enumerate()
                 .for_each(|(z, chunk)| {
+                    let z = z as i64 + start_z;
                     for y in start_y..end_y {
                         for x in start_x..end_x {
                             let index = (x + y * width as i64) as usize;
@@ -433,6 +436,7 @@ pub fn fuse_3d(
                 .par_chunks_mut(width * height)
                 .enumerate()
                 .for_each(|(z, chunk)| {
+                    let z = z as i64 + start_z;
                     for y in start_y..end_y {
                         for x in start_x..end_x {
                             let index = (x + y * width as i64) as usize;
@@ -456,6 +460,7 @@ pub fn fuse_3d(
                     .par_chunks_mut(width * height)
                     .enumerate()
                     .for_each(|(z, chunk)| {
+                        let z = z as i64 + start_z;
                         for y in start_y..end_y {
                             for x in start_x..end_x {
                                 let index = (x + y * width as i64) as usize;
