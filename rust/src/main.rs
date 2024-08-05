@@ -41,6 +41,9 @@ fn main() {
             "-no-fuse" => {
                 config.no_fuse = true;
             }
+            "-copy" => {
+                config.copy_files = true;
+            }
             _ => {
                 println!("Invalid argument: {}", args[i]);
                 return;
@@ -405,10 +408,11 @@ fn stitch_3d(
     }
 
     tile_paths = 
-        tile_paths.par_iter().map(|path| {
+        tile_paths.iter().enumerate().map(|(i, path)| {
             let file_name = path.file_name().unwrap();
             let temp_path = temp_dir.join(file_name);
             std::fs::copy(path, temp_path.clone()).unwrap();
+            println!("[{}/{}] Copied file: {:?} to {:?}", i + 1, tile_paths.len(), path, temp_path);
             temp_path
         }).collect::<Vec<_>>();
     }
