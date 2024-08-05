@@ -359,25 +359,6 @@ pub fn fuse_3d(
 
         match mode {
             FuseMode::Average => {
-                for z in start_z..end_z {
-                    for y in start_y..end_y {
-                        for x in start_x..end_x {
-                            let index = (x + y * width as i64 + z * width as i64 * height as i64) as usize;
-                            let val = get_val(
-                                (
-                                    (x - offset_i.0) as usize,
-                                    (y - offset_i.1) as usize,
-                                    (z - offset_i.2) as usize,
-                                ),
-                                offset_f,
-                                &image,
-                            );
-                            let val = ((val - min) / (max - min) * 255.0).clamp(0.0, 255.0) as u8;
-                            new_image[index] =
-                            new_image[index].saturating_add(val / new_image_counts[index]);
-                        }
-                    }
-                }
                 new_image[start_z as usize * width * height..end_z as usize * width * height]
                 .par_chunks_mut(width * height)
                 .enumerate()
