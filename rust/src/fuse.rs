@@ -56,8 +56,11 @@ pub fn fuse_2d(
     println!("Fusing image {} x {}", width, height);
     let mut new_image: Vec<f32> = vec![0.0; (width * height) as usize];
     let mut new_image_counts: Vec<u8> = vec![];
+    let mut new_image_weights: Vec<f32> = vec![];
     if mode == FuseMode::Average {
         new_image_counts = vec![0; (width * height) as usize];
+    } else if mode == FuseMode::Linear {
+        new_image_weights = vec![0.0; (width * height) as usize];
     }
 
     for i in 0..num_images {
@@ -117,7 +120,13 @@ pub fn fuse_2d(
                         new_image[index] = val;
                     }
                     FuseMode::Linear => {
-                        println!("Linear mode not implemented for 2D images");
+                        let weight = get_linear_weight_3d(
+                            (image.width, image.height, 0),
+                            (src_x, src_y, 0),
+                            1.5,
+                        );
+                        new_image[index] += val * weight;
+                        new_image_weights[index] += weight;
                     }
                 }
             }
@@ -128,6 +137,12 @@ pub fn fuse_2d(
         for i in 0..(width * height) as usize {
             if new_image_counts[i] > 0 {
                 new_image[i] /= new_image_counts[i] as f32;
+            }
+        }
+    } else if mode == FuseMode::Linear {
+        for i in 0..(width * height) as usize {
+            if new_image_weights[i] > 0.0 {
+                new_image[i] /= new_image_weights[i];
             }
         }
     }
