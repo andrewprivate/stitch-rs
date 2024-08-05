@@ -18,13 +18,13 @@ pub fn get_linear_weight_3d(
     offset: (usize, usize, usize),
     alpha: f32,
 ) -> f32 {
-    let mut minDistance = 1.0;
-    minDistance *= (offset.0.min(dim.0 - offset.0 - 1) + 1) as f32;
-    minDistance *= (offset.1.min(dim.1 - offset.1 - 1) + 1) as f32;
-    minDistance *= (offset.2.min(dim.2 - offset.2 - 1) + 1) as f32;
+    let mut min_distance = 1.0;
+    min_distance *= (offset.0.min(dim.0 - offset.0 - 1) + 1) as f32;
+    min_distance *= (offset.1.min(dim.1 - offset.1 - 1) + 1) as f32;
+    min_distance *= (offset.2.min(dim.2 - offset.2 - 1) + 1) as f32;
 
-    minDistance += 1.0;
-    return alpha.powf(minDistance);
+    min_distance += 1.0;
+    return min_distance.powf(alpha);
 }
 
 pub fn fuse_2d(
@@ -316,7 +316,7 @@ pub fn fuse_3d(
                             let index =
                                 (x + y * width as i64) as usize;
                             chunk[index] += get_linear_weight_3d(
-                                (width, height, depth),
+                                (image.width, image.height, image.depth),
                                 (
                                     (x - offset_i.0) as usize,
                                     (y - offset_i.1) as usize,
@@ -374,7 +374,7 @@ pub fn fuse_3d(
                             new_image[index] = new_image[index].saturating_add(
                                 (val as f32
                                     * get_linear_weight_3d(
-                                        (width, height, depth),
+                                        (image.width, image.height, image.depth),
                                         (
                                             (x - offset_i.0) as usize,
                                             (y - offset_i.1) as usize,
