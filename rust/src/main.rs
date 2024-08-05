@@ -44,6 +44,30 @@ fn main() {
             "-copy" => {
                 config.copy_files = true;
             }
+            "-fuse-mode" => {
+                i += 1;
+                match args[i].as_str() {
+                    "average" => {
+                        config.fuse_mode = FuseMode::Average;
+                    }
+                    "max" => {
+                        config.fuse_mode = FuseMode::Max;
+                    }
+                    "min" => {
+                        config.fuse_mode = FuseMode::Min;
+                    }
+                    "overwrite" => {
+                        config.fuse_mode = FuseMode::Overwrite;
+                    }
+                    "linear" => {
+                        config.fuse_mode = FuseMode::Linear;
+                    }
+                    _ => {
+                        println!("Invalid fuse mode: {}", args[i]);
+                        return;
+                    }
+                }
+            }
             _ => {
                 println!("Invalid argument: {}", args[i]);
                 return;
