@@ -1186,18 +1186,22 @@ fn test_cross_3d(
     let mut count = 0;
 
     for z in start_z..end_z {
+        let plane1 = (z - offset_img1_z) * w1 * h1;
+        let plane2 = (z - offset_img2_z) * w2 * h2;
         for y in start_y..end_y {
-            for x in start_x..end_x {
-                let val1 = img1.data
-                    [(z - offset_img1_z) * w1 * h1 + (y - offset_img1_y) * w1 + (x - offset_img1_x)]
-                    as f64;
-                let val2 = img2.data
-                    [(z - offset_img2_z) * w2 * h2 + (y - offset_img2_y) * w2 + (x - offset_img2_x)]
-                    as f64;
-                avg1 += val1;
-                avg2 += val2;
-                count += 1;
-            }
+            let start_x1 = plane1 + (y - offset_img1_y) * w1;
+            let start_x2 = plane2 + (y - offset_img2_y) * w2;
+            let w = end_x - start_x;
+            let slice1 = &img1.data[start_x1..start_x1 + w];
+            let slice2 = &img2.data[start_x2..start_x2 + w];
+
+            let sum1 = slice1.iter().sum::<f32>();
+            let sum2 = slice2.iter().sum::<f32>();
+
+            avg1 += sum1 as f64;
+            avg2 += sum2 as f64;
+
+            count += w as i64;
         }
     }
 
@@ -1214,14 +1218,18 @@ fn test_cross_3d(
     let mut covar = 0.0;
 
     for z in start_z..end_z {
+        let plane1 = (z - offset_img1_z) * w1 * h1;
+        let plane2 = (z - offset_img2_z) * w2 * h2;
         for y in start_y..end_y {
-            for x in start_x..end_x {
-                let val1 = img1.data
-                    [(z - offset_img1_z) * w1 * h1 + (y - offset_img1_y) * w1 + (x - offset_img1_x)]
-                    as f64;
-                let val2 = img2.data
-                    [(z - offset_img2_z) * w2 * h2 + (y - offset_img2_y) * w2 + (x - offset_img2_x)]
-                    as f64;
+            let start_x1 = plane1 + (y - offset_img1_y) * w1;
+            let start_x2 = plane2 + (y - offset_img2_y) * w2;
+            let w = end_x - start_x;
+            let slice1 = &img1.data[start_x1..start_x1 + w];
+            let slice2 = &img2.data[start_x2..start_x2 + w];
+
+            for i in 0..w {
+                let val1 = slice1[i] as f64;
+                let val2 = slice2[i] as f64;
 
                 let pixel_ssq = (val1 - val2).powi(2);
                 ssq += pixel_ssq;
@@ -1230,8 +1238,8 @@ fn test_cross_3d(
                 let dist2 = val2 - avg2;
 
                 covar += dist1 * dist2;
-                var1 += dist1.powi(2);
-                var2 += dist2.powi(2);
+                var1 += dist1 * dist1;
+                var2 += dist2 * dist2;
             }
         }
     }
