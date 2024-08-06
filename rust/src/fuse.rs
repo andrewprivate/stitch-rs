@@ -347,7 +347,14 @@ pub fn fuse_3d(
             println!("Image weights calculated");
     }
 
-    let mut new_image: Vec<u8> = vec![0; (width * height * depth) as usize];
+    let default_value = match mode {
+        FuseMode::Average => 0,
+        FuseMode::Max => 0,
+        FuseMode::Min => 255,
+        FuseMode::Overwrite => 0,
+        FuseMode::Linear => 0,
+    };
+    let mut new_image: Vec<u8> = vec![default_value; (width * height * depth) as usize];
     for i in 0..num_images {
         let imgfile = &images[subgraph_indexes[i]];
         let image = imgfile.get_image();
