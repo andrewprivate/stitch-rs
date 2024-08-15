@@ -107,6 +107,7 @@ pub struct StitchConfig {
     pub tile_paths: Vec<PathBuf>,
     pub tile_layout: Vec<IBox3D>,
     pub copy_files: bool,
+    pub use_phase_correlation: bool,
 }
 
 impl StitchConfig {
@@ -127,6 +128,7 @@ impl StitchConfig {
             tile_paths: vec![],
             tile_layout: vec![],
             copy_files: false,
+            use_phase_correlation: true
         }
     }
 }
@@ -247,6 +249,11 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
         }
 
         println!("Fuse mode: {:?}", config.fuse_mode);
+    }
+
+    if !json.get("use_phase_correlation").is_none() {
+        config.use_phase_correlation = json["use_phase_correlation"].as_bool().unwrap();
+        println!("Use phase correlation: {}", config.use_phase_correlation);
     }
 
     // Check no fuse
@@ -490,6 +497,7 @@ fn stitch_3d(
             config.relative_error_threshold,
             config.absolute_error_threshold,
             config.dimension_mask,
+            config.use_phase_correlation
         );
         println!("Time to find alignment: {:?}", start.elapsed());
         stitched_result = Some(result);
@@ -582,6 +590,7 @@ fn stitch_2d(
             config.relative_error_threshold,
             config.absolute_error_threshold,
             dim_mask,
+            config.use_phase_correlation
         );
         println!("Time to find alignment: {:?}", start.elapsed());
         stitched_result = Some(result);

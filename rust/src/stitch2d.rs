@@ -92,6 +92,7 @@ pub fn stitch(
     relative_error_threshold: f32,
     absolute_error_threshold: f32,
     dimension_mask: (bool, bool),
+    use_phase_correlation: bool,
 ) -> Stitch2DResult {
     let mut overlap_map = create_overlap_map(images, layout);
     println!("Overlap map: {:?}", overlap_map);
@@ -153,6 +154,10 @@ pub fn stitch(
                         .zip(mov_fft.iter())
                         .map(|(a, b)| {
                             let res = a * b.conj();
+                            if !use_phase_correlation {
+                                return res;
+                            }
+
                             let norm = res.norm();
                             if norm > f32::EPSILON {
                                 res / norm
@@ -186,15 +191,18 @@ pub fn stitch(
                         .collect::<Vec<_>>();
 
                     // Filter peaks
-                    let min_x = -(max_size.0 as i64) / 2;
-                    let min_y = -(max_size.1 as i64) / 2;
-                    let max_x = max_size.0 as i64 / 2;
-                    let max_y = max_size.1 as i64 / 2;
+                    let ratio = 0.75;
+                    let max_shift = (
+                        (max_size.0 as f32 * ratio) as i64,
+                        (max_size.0 as f32 * ratio) as i64
+                    );
+                    
+
                     peaks.retain(|peak| {
-                        peak.0 >= min_x
-                            && peak.0 <= max_x
-                            && peak.1 >= min_y
-                            && peak.1 <= max_y
+                        peak.0 >= -max_shift.0 &&
+                        peak.0 <= max_shift.0 &&
+                        peak.1 >= -max_shift.1 &&
+                        peak.1 <= max_shift.1
                     });
 
 
