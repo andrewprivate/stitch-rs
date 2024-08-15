@@ -185,6 +185,19 @@ pub fn stitch(
                         .flat_map(|peak| disambiguate_2d(max_size.0, max_size.1, *peak))
                         .collect::<Vec<_>>();
 
+                    // Filter peaks
+                    let min_x = -(max_size.0 as i64) / 2;
+                    let min_y = -(max_size.1 as i64) / 2;
+                    let max_x = max_size.0 as i64 / 2;
+                    let max_y = max_size.1 as i64 / 2;
+                    peaks.retain(|peak| {
+                        peak.0 >= min_x
+                            && peak.0 <= max_x
+                            && peak.1 >= min_y
+                            && peak.1 <= max_y
+                    });
+
+
                     // Mask peaks
                     peaks.iter_mut().for_each(|peak| {
                         if !dimension_mask.0 {

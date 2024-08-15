@@ -1,5 +1,5 @@
 use fuse::{fuse_2d, fuse_3d, FuseMode};
-use image::{read_dcm, read_dcm_headers, read_tiff, read_tiff_headers, save_as_dcm, save_as_dcm_8, Image2D, Image3D, Image3D8, Image3DFile};
+use image::{read_dcm, read_dcm_headers, read_image_2d, read_tiff, read_tiff_headers, save_as_dcm, save_as_dcm_8, save_image_2d, Image2D, Image3D, Image3D8, Image3DFile};
 use rayon::prelude::*;
 use serde_json::*;
 use std::path::{Path, PathBuf};
@@ -548,23 +548,7 @@ fn stitch_2d(
             if !path.exists() {
                 panic!("File does not exist: {:?}", path);
             }
-            let ext = path.extension().unwrap().to_str().unwrap();
-            let image = if ext == "tiff" {
-                read_tiff(path.as_path())
-            } else if ext == "dcm" {
-                read_dcm(path.as_path())
-            } else {
-                panic!("Invalid file format");
-            };
-
-            let frame = image.get_frame(0);
-            Image2D {
-                data: frame.data.to_vec(),
-                width: frame.width,
-                height: frame.height,
-                min: frame.min,
-                max: frame.max,
-            }
+            read_image_2d(&path)
         })
         .collect::<Vec<_>>();
 
@@ -632,16 +616,8 @@ fn stitch_2d(
             let output_file = format!("fused_{}.dcm", i);
             let buf = config.output_path.join(output_file);
             let path = buf.as_path();
-            let image3d = Image3D {
-                data: fused_image.data,
-                width: fused_image.width,
-                height: fused_image.height,
-                min: fused_image.min,
-                max: fused_image.max,
-                depth: 1,
-            };
 
-            save_as_dcm(path, &image3d);
+            save_image_2d(path, &fused_image);
         });
 
     println!("Time to fuse images: {:?}", start.elapsed());

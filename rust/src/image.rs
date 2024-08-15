@@ -1,6 +1,6 @@
 use core::f32;
-use std::{path::{Path, PathBuf}, u16};
-
+use std::{io::Cursor, path::{Path, PathBuf}, u16};
+use image::ImageReader;
 use dicom::{core::{DataElement, PrimitiveValue, VR}, dictionary_std::tags, pixeldata::PixelDecoder};
 use rustfft::num_traits::Pow;
 use serde_json::de;
@@ -182,6 +182,16 @@ impl Image2D {
     pub fn set(&mut self, x: usize, y: usize, value: f32) {
         let index = self.get_index(x, y);
         self.data[index] = value;
+    }
+
+    pub fn calc_min_max(&self) -> (f32, f32) {
+        let mut min = f32::MAX;
+        let mut max = f32::MIN;
+        for i in 0..self.data.len() {
+            min = min.min(self.data[i]);
+            max = max.max(self.data[i]);
+        }
+        (min, max)
     }
 }
 
@@ -451,6 +461,17 @@ pub fn image3d_to_u16(image: &Image3D) -> Vec<u16> {
     image.data.iter().map(|x| ((x - min) / range * u16::MAX as f32).round().clamp(0.0, u16::MAX as f32) as u16).collect::<Vec<u16>>()
 }
 
+pub fn image2d_to_u16(image: &Image2D) -> Vec<u16> {
+    let (min, max) = if image.max - image.min == 0.0 {
+        image.calc_min_max()
+    } else {
+        (image.min, image.max)
+    };
+    let range = max - min;
+
+    image.data.iter().map(|x| ((x - min) / range * u16::MAX as f32).round().clamp(0.0, u16::MAX as f32) as u16).collect::<Vec<u16>>()
+}
+
 /**
  * Read the image from a dicom file
  */
@@ -583,4 +604,32 @@ pub fn read_tiff_headers(file_path: &Path) -> Image3DFile {
         max: max as f32,
         path: file_path.to_path_buf(),
     }
+}
+
+pub fn read_image_2d(file_path: &Path) -> Image2D {
+    let img = ImageReader::open(file_path).unwrap().decode().unwrap();
+    let width = img.width();
+    let height = img.height();
+    let size = width * height;
+    let buffer = img.into_luma16().into_vec();
+    let min = 0.0;
+    let max = u16::MAX as f32;
+
+    let image = Image2D {
+        width: width as usize,
+        height: height as usize,
+        data: buffer.iter().map(|x| *x as f32).collect(),
+        min,
+        max,
+    };
+
+    image
+}
+
+pub fn save_image_2d(file_path: &Path, image: &Image2D) {
+    let width = image.width as u32;
+    let height = image.height as u32;
+    let buffer = image2d_to_u16(image);
+    let img = image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_raw(width, height, buffer).unwrap();
+    img.save(file_path).unwrap();
 }
