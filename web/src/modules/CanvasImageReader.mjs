@@ -6,12 +6,15 @@ export class CanvasImageReader {
     }
     async getGray8() {
         const bitmap = await createImageBitmap(this.file);
-        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const width = bitmap.width;
+        const height = bitmap.height;
+        const canvas = new OffscreenCanvas(width, height);
         const context = canvas.getContext('2d');
         context.imageSmoothingEnabled = false;
         context.drawImage(bitmap, 0, 0);
-        const imageData = context.getImageData(0, 0, bitmap.width, bitmap.height);
-        const data = new Uint8Array(imageData.width * imageData.height);
+        bitmap.close();
+        const imageData = context.getImageData(0, 0, width, height);
+        const data = new Uint8Array(width * height);
         for (let i = 0; i < data.length; i++) {
             const r = imageData.data[i * 4];
             const g = imageData.data[i * 4 + 1];
@@ -21,8 +24,8 @@ export class CanvasImageReader {
         }
 
         return new GrayImage3D({
-            width: imageData.width,
-            height: imageData.height,
+            width,
+            height,
             depth: 1,
             data
         });

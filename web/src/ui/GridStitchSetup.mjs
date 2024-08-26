@@ -132,6 +132,17 @@ export class GridStitchSetup {
 
         // Sort by index
         this.tileEntries.sort((a, b) => a.values[0] - b.values[0]);
+
+        // Remove sort indicators from other columns
+        const headerRow = this.ui.tileTable.children[0].children[0];
+        const headerColumns = Array.from(headerRow.children);
+        headerColumns.forEach((th, i) => {
+            th.classList.remove('sorted-asc');
+            th.classList.remove('sorted-desc');
+        });
+
+        this.tileTableSortCriteria = 0;
+        this.tileTableSortDirection = 1;
     }
     loadTileTable() {
         const entries = this.controller.entries;
@@ -197,15 +208,16 @@ export class GridStitchSetup {
             });
         }
 
-        // Set new index values
-        this.tileEntries.forEach((entry, i) => {
-            entry.values[0] = i + 1;
-        });
 
         this.updateTileTable();
     }
 
     updateTileTable() {
+        // Set new index values
+        this.tileEntries.forEach((entry, i) => {
+            entry.values[0] = i + 1;
+        });
+        
         // Clear existing rows
         this.ui.tileTableBody.replaceChildren();
 
@@ -227,11 +239,21 @@ export class GridStitchSetup {
                 const lastModifiedCell = document.createElement('td');
                 const sizeCell = document.createElement('td');
 
+                const removeButton = document.createElement('button');
+                removeButton.className = 'remove-button';
+                removeButton.innerText = 'X';
+                removeButton.addEventListener('click', () => {
+                    this.tileEntries = this.tileEntries.filter(e => e !== entry);
+                    this.updateTileTable();
+                });
+
                 row.appendChild(widthCell);
                 row.appendChild(heightCell);
                 row.appendChild(depthCell);
                 row.appendChild(lastModifiedCell);
                 row.appendChild(sizeCell);
+
+                row.appendChild(removeButton);
 
                 entry.entry.imagePromise.then(image => {
                     widthCell.innerText = image.width;

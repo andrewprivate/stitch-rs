@@ -577,6 +577,7 @@ body {
     position: sticky;
     top: 0;
     user-select: none;
+    z-index: 10;
 }
 
 .web-stitch .grid-stitch-setup table.tile-table thead th {
@@ -604,6 +605,26 @@ body {
 
 .web-stitch .grid-stitch-setup table.tile-table tbody tr {
     border-bottom: 1px solid rgb(221, 221, 221);
+    position: relative;
+}
+
+.web-stitch .grid-stitch-setup table.tile-table tbody tr .remove-button {
+    display: none;
+    cursor: pointer;
+    position: absolute;
+    right: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    background-color: rgba(255, 0, 0, 0.1);
+    padding: 5px;
+}
+
+.web-stitch .grid-stitch-setup table.tile-table tbody tr:hover .remove-button {
+    display: block;
+}
+
+.web-stitch .grid-stitch-setup table.tile-table tbody tr:hover .remove-button:hover {
+    background-color: rgba(255, 0, 0, 0.2);
 }
 
 .web-stitch .grid-stitch-setup table.tile-table tbody tr td {
