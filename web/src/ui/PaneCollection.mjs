@@ -1,5 +1,5 @@
 import { EventEmitter } from "../modules/EventEmitter.mjs";
-import { Sortable } from "../modules/sortable.mjs";
+import { Sortable } from "../modules/Sortable.mjs";
 
 
 export class ContentPane extends EventEmitter {

@@ -1,4 +1,4 @@
-import { Sortable } from "../modules/sortable.mjs";
+import { Sortable } from "../modules/Sortable.mjs";
 import { Utils } from "../utils/Utils.mjs";
 
 export class GridStitchSetup {
