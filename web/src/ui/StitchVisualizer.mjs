@@ -332,7 +332,7 @@ export class StitchVisualizer {
 
             if (matchedViewer !== -1) {
                 viewers.push(this.viewers[matchedViewer]);
-                this.ui.imagesContainer.appendChild(viewers[matchedViewer].canvas);
+                this.ui.imagesContainer.appendChild(this.viewers[matchedViewer].canvas);
             } else {
                 const viewer = new Viewer3DSlice();
                 viewers.push(viewer);
