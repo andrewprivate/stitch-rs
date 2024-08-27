@@ -2,7 +2,8 @@ import { Utils } from "../utils/Utils.mjs";
 import { SliceDirection, Viewer3DSlice } from "./Viewer3D.mjs";
 
 export class StitchVisualizer {
-    constructor() {
+    constructor(options) {
+        this.options = options;
         this.ui = {};
         this.images = [];
         this.viewers = [];
@@ -30,7 +31,7 @@ export class StitchVisualizer {
 
         const minSlice = minZ - halfDepth;
         const maxSlice = minSlice + depth - 1;
-        return { 
+        return {
             min: minSlice,
             max: maxSlice
         }
@@ -99,25 +100,27 @@ export class StitchVisualizer {
         });
 
         // Hook scroll event for zooming
-        this.ui.imagesContainer.addEventListener('wheel', (event) => {
-            event.preventDefault();
+        if (!this.options?.noZoom) {
+            this.ui.imagesContainer.addEventListener('wheel', (event) => {
+                event.preventDefault();
 
-            const mousePos = this.getMousePosInContainer(event);
-            const imageCoords = this.mousePosToImageCoords(mousePos);
+                const mousePos = this.getMousePosInContainer(event);
+                const imageCoords = this.mousePosToImageCoords(mousePos);
 
-            // Zoom in/out centered on mouse position
-            const zoomFactor = 0.04;
-            const scaleChange = event.deltaY > 0 ? -zoomFactor : (event.deltaY < 0 ? zoomFactor : 0);
-            this.scale *= (1 + scaleChange);
+                // Zoom in/out centered on mouse position
+                const zoomFactor = 0.04;
+                const scaleChange = event.deltaY > 0 ? -zoomFactor : (event.deltaY < 0 ? zoomFactor : 0);
+                this.scale *= (1 + scaleChange);
 
-            // Adjust center offset based on zoom
-            const newImageCoords = this.mousePosToImageCoords(mousePos);
-            this.centerOffset.x += (newImageCoords.x - imageCoords.x) * this.scale;
-            this.centerOffset.y += (newImageCoords.y - imageCoords.y) * this.scale;
+                // Adjust center offset based on zoom
+                const newImageCoords = this.mousePosToImageCoords(mousePos);
+                this.centerOffset.x += (newImageCoords.x - imageCoords.x) * this.scale;
+                this.centerOffset.y += (newImageCoords.y - imageCoords.y) * this.scale;
 
 
-            this.applyTransforms();
-        });
+                this.applyTransforms();
+            });
+        }
 
         // Hook click and drag for panning
         this.isDragging = false;
@@ -139,16 +142,17 @@ export class StitchVisualizer {
             document.removeEventListener('mousemove', mouseMoveHandler);
             document.removeEventListener('mouseup', mouseUpHandler);
         }
+        if (!this.options?.noPan) {
+            this.ui.imagesContainer.addEventListener('mousedown', (event) => {
+                if (!event.button === 0) return; // Only left mouse button
+                this.isDragging = true;
+                startDragPos = { x: event.clientX, y: event.clientY };
+                startDragOffset = { x: this.centerOffset.x, y: this.centerOffset.y };
 
-        this.ui.imagesContainer.addEventListener('mousedown', (event) => {
-            if (!event.button === 0) return; // Only left mouse button
-            this.isDragging = true;
-            startDragPos = { x: event.clientX, y: event.clientY };
-            startDragOffset = { x: this.centerOffset.x, y: this.centerOffset.y };
-
-            document.addEventListener('mousemove', mouseMoveHandler);
-            document.addEventListener('mouseup', mouseUpHandler);
-        });
+                document.addEventListener('mousemove', mouseMoveHandler);
+                document.addEventListener('mouseup', mouseUpHandler);
+            });
+        }
 
         this.ui.imagesContainer.addEventListener('mousemove', (event) => {
             const mousePos = this.getMousePosInContainer(event);
@@ -156,7 +160,7 @@ export class StitchVisualizer {
             let value = null;
             let values = [];
             const bounds = this.getFrameBounds();
-            this.viewers.forEach((viewer, i)=>{
+            this.viewers.forEach((viewer, i) => {
                 if (viewer.sliceData) {
                     const offset = this.getOffsetForImage(i);
                     const frames = viewer.getSliceCount();
@@ -173,13 +177,13 @@ export class StitchVisualizer {
                         values.push(viewer.sliceData[y * width + x])
                     }
                 }
-    
+
             })
 
             if (values.length > 0) {
                 value = values.join(', ');
             }
-         
+
             this.ui.positionValueDisplay.textContent = `(${imageCoords.x.toFixed(2)}, ${imageCoords.y.toFixed(2)}): ${value !== null ? value : ''}`;
         });
 
@@ -207,24 +211,31 @@ export class StitchVisualizer {
     }
 
     setImages(images, offsets) {
+        const viewers = [];
         images.forEach((image, i) => {
-            this.addImage(image, offsets[i].x, offsets[i].y, offsets[i].z);
+            const matchedViewer = this.viewers.findIndex(viewer => viewer.image === image);
+
+            if (matchedViewer !== -1) {
+                viewers.push(this.viewers[matchedViewer]);
+            } else {
+                const viewer = new Viewer3DSlice();
+                this.ui.imagesContainer.appendChild(viewer.canvas);
+                viewers.push(viewer);
+            }
+
+            const viewer = viewers[i];
+            viewer.setImage(image);
+            viewer.setSliceDirection(this.sliceDirection);
+            
         });
+        this.viewers = viewers;
+        this.images = images;
+        this.offsets = offsets;
 
         this.invalidateCache();
         this.centerAndScale();
         this.setSliceIndex(0, true);
         this.updateSliceSlider();
-    }
-
-    addImage(image, offsetX, offsetY, offsetZ) {
-        this.images.push(image);
-        const viewer = new Viewer3DSlice();
-        viewer.setImage(image);
-        viewer.setSliceDirection(this.sliceDirection);
-        this.viewers.push(viewer);
-        this.ui.imagesContainer.appendChild(viewer.canvas);
-        this.offsets.push({ x: offsetX, y: offsetY, z: offsetZ });
     }
 
     invalidateCache() {
@@ -353,7 +364,7 @@ export class StitchVisualizer {
         for (let i = 0; i < this.viewers.length; i++) {
             const viewer = this.viewers[i];
             const { x, y } = this.getOffsetForImage(i);
-            const {width, height} = this.getBoundsForImage(i);
+            const { width, height } = this.getBoundsForImage(i);
 
             const offsetX = (x - midPoint.x + width / 2) * this.scale + this.centerOffset.x - width / 2;
             const offsetY = (y - midPoint.y + height / 2) * this.scale + this.centerOffset.y - height / 2;
@@ -389,6 +400,8 @@ export class StitchVisualizer {
                 viewer.setSliceIndex(newIndex);
             }
         });
+
+        this.applyTransforms();
     }
 
     setSliceDirection(direction) {
@@ -412,7 +425,7 @@ export class StitchVisualizer {
         });
 
         this.invalidateCache();
-    
+
         // Restore from cache
         const cache = this.directionCache[direction];
         if (cache) {

@@ -26,6 +26,7 @@ export class Viewer3DSlice {
     }
 
     setImage(image) {
+        if (image === this.image) return;
         this.image = image;
         this.renderCache = {};
         this.sliceDirection = SliceDirection.Z;
@@ -166,7 +167,7 @@ export class Viewer3DSlice {
     }
 
     destroy() {
-        this.ui.container.remove();
+        this.canvas.remove();
         this.image = null;
         this.ui = {};
     }

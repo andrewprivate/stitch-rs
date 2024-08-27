@@ -622,7 +622,7 @@ fn stitch_2d(
                 offset,
                 config.fuse_mode,
             );
-            let output_file = format!("fused_{}.dcm", i);
+            let output_file = format!("fused_{}.png", i);
             let buf = config.output_path.join(output_file);
             let path = buf.as_path();
 

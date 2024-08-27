@@ -1,5 +1,7 @@
 import { Sortable } from "../modules/Sortable.mjs";
 import { Utils } from "../utils/Utils.mjs";
+import { StitchVisualizer } from "./StitchVisualizer.mjs";
+import { SliceDirection } from "./Viewer3D.mjs";
 
 export class GridStitchSetup {
     constructor(controller) {
@@ -29,6 +31,26 @@ export class GridStitchSetup {
             label
         }
     }
+
+    createSliderWithLabel(labelText, inputMin, inputMax, inputStep) {
+        const inputCtn = document.createElement('div');
+        inputCtn.classList.add('input-ctn');
+        const input = document.createElement('input');
+        input.type = 'range';
+        input.min = inputMin;
+        input.max = inputMax;
+        input.step = inputStep;
+        const label = document.createElement('label');
+        label.innerText = labelText;
+        inputCtn.appendChild(label);
+        inputCtn.appendChild(input);
+        return {
+            inputCtn,
+            input,
+            label
+        }
+    }
+
     setupUI() {
         this.ui.container = document.createElement('div');
         this.ui.container.className = 'grid-stitch-setup';
@@ -113,9 +135,97 @@ export class GridStitchSetup {
             },
         });
 
-
-
         this.loadTileTable();
+
+
+        // Step 2
+        this.ui.step2 = document.createElement('div');
+        this.ui.step2.className = 'step2';
+
+        this.ui.step2Title = document.createElement('h2');
+        this.ui.step2Title.innerText = 'Step 2: Configure grid';
+        this.ui.step2.appendChild(this.ui.step2Title);
+
+        // Button container
+        this.ui.buttonList = document.createElement('div');
+        this.ui.buttonList.className = 'button-list';
+        this.ui.step2.appendChild(this.ui.buttonList);
+
+
+        this.ui.gridWidth = this.createInputWithLabel('Grid Width', 'number', 1, 100);
+        this.ui.buttonList.appendChild(this.ui.gridWidth.inputCtn);
+
+        this.ui.gridHeight = this.createInputWithLabel('Grid Height', 'number', 1, 100);
+        this.ui.buttonList.appendChild(this.ui.gridHeight.inputCtn);
+
+        this.ui.gridDepth = this.createInputWithLabel('Grid Depth', 'number', 1, 100);
+        this.ui.buttonList.appendChild(this.ui.gridDepth.inputCtn);
+
+        this.ui.gridWidth.input.value = 1;
+        this.ui.gridHeight.input.value = 1;
+        this.ui.gridDepth.input.value = 1;
+
+        // Add select menu for grid type
+        this.ui.gridType = document.createElement('select');
+        this.ui.gridType.className = 'grid-type';
+        this.ui.buttonList.appendChild(this.ui.gridType);
+
+        const gridTypes = [
+            'row-by-row', 
+            'column-by-column',
+            'snake-by-row',
+            'snake-by-column',
+        ];
+
+        gridTypes.forEach(type => {
+            const option = document.createElement('option');
+            option.value = type;
+            option.innerText = type;
+            this.ui.gridType.appendChild(option);
+        });
+
+        this.ui.gridType.value = 'snake-by-row';
+
+
+        // Add sliders for overlap x, y, and z
+        this.ui.overlapX = this.createSliderWithLabel('Overlap X', 0, 100, 1);
+        this.ui.step2.appendChild(this.ui.overlapX.inputCtn);
+
+        this.ui.overlapY = this.createSliderWithLabel('Overlap Y', 0, 100, 1);
+        this.ui.step2.appendChild(this.ui.overlapY.inputCtn);
+
+        this.ui.overlapZ = this.createSliderWithLabel('Overlap Z', 0, 100, 1);
+        this.ui.step2.appendChild(this.ui.overlapZ.inputCtn);
+
+        this.ui.overlapX.input.value = 0;
+        this.ui.overlapY.input.value = 0;
+        this.ui.overlapZ.input.value = 0;
+        
+
+
+        // Add button to generate grid
+        this.ui.generateGridButton = document.createElement('button');
+        this.ui.generateGridButton.className = 'generate-grid-button';
+        this.ui.generateGridButton.innerText = 'Generate Grid';
+        this.ui.generateGridButton.addEventListener('click', () => {
+            this.generateGrid();
+        });
+
+        this.ui.step2.appendChild(this.ui.generateGridButton);
+
+        this.ui.container.appendChild(this.ui.step2);
+
+        // Add grid preview
+        this.ui.gridPreview = document.createElement('div');
+        this.ui.gridPreview.className = 'grid-preview';
+        this.ui.container.appendChild(this.ui.gridPreview);
+
+        // Add 3d stitch preview viewer
+        this.ui.stitchPreview = new StitchVisualizer({
+            noZoom: true,
+            noPan: true,
+        });
+        this.ui.gridPreview.appendChild(this.ui.stitchPreview.getElement());
     }
 
     loadIndexedFromTable(){
@@ -307,6 +417,134 @@ export class GridStitchSetup {
     }
 
     async render() {
+
+        await this.ui.stitchPreview.render();
+
+    }
+
+    async generateGrid() {
+        const gridWidth = Math.max(parseInt(this.ui.gridWidth.input.value), 1);
+        const gridHeight = Math.max(parseInt(this.ui.gridHeight.input.value), 1);
+        const gridDepth = Math.max(parseInt(this.ui.gridDepth.input.value), 1);
+
+        // get size
+        const size = gridWidth * gridHeight * gridDepth;
+        if (size !== this.tileEntries.length) {
+            alert('Grid size does not match number of tiles');
+            return;
+        }
+
+        const gridSize = {
+            width: gridWidth,
+            height: gridHeight,
+            depth: gridDepth
+        }
+        const gridType = this.ui.gridType.value;
+
+        let hasWidth = (gridWidth > 1) ? 1 : 0;
+        let hasHeight = (gridHeight > 1) ? 1 : 0;
+        let hasDepth = (gridDepth > 1) ? 1 : 0;
+
+        if (hasWidth + hasDepth + hasHeight > 2) {
+            alert('Only two of grid width, height, and depth can be greater than 1');
+            return;
+        }
+
+        const dimensions = ['x', 'y', 'z'];
+        const dimensionsKeys = ['width', 'height', 'depth'];
+        
+        const stitchDimensions = [];
+        const stitchKeys = [];
+        if (hasWidth) {
+            stitchDimensions.push('x');
+            stitchKeys.push('width');
+        }
+        
+        if (hasHeight) {
+            stitchDimensions.push('y');
+            stitchKeys.push('height');
+        }
+        
+        if (hasDepth || stitchDimensions.length === 1) {
+            stitchDimensions.push('z');
+            stitchKeys.push('depth');
+        }
+
+        if (stitchDimensions.length === 0) {
+            alert('At least one of grid width, height, or depth must be greater than 1');
+        }
+        
+        if (gridType === 'row-by-row' || gridType === 'snake-by-row') {
+            // Reverse dimensions
+            stitchDimensions.reverse();
+            stitchKeys.reverse();
+        } else if (gridType === 'column-by-column' || gridType === 'snake-by-column') {
+            
+        }
+
+        let snake = false;
+        if (gridType === 'snake-by-row' || gridType === 'snake-by-column') {
+            snake = true;
+        }
+
+        // Find average width, height, and depth
+        const totalWidth = this.tileEntries.reduce((acc, entry) => acc + entry.values[2], 0);
+        const totalHeight = this.tileEntries.reduce((acc, entry) => acc + entry.values[3], 0);
+        const totalDepth = this.tileEntries.reduce((acc, entry) => acc + entry.values[4], 0);
+
+        let averageWidth = totalWidth / this.tileEntries.length;
+        let averageHeight = totalHeight / this.tileEntries.length;
+        let averageDepth = totalDepth / this.tileEntries.length;
+
+        const tileSize = {
+            width: averageWidth,
+            height: averageHeight,
+            depth: averageDepth
+        }
+
+        const offsets = [];
+
+        const dim1 = stitchDimensions[0];
+        const dim2 = stitchDimensions[1];
+        const dim1key = stitchKeys[0];
+        const dim2key = stitchKeys[1];
+        const dim1Size = gridSize[dim1key];
+        const dim2Size = gridSize[dim2key];
+
+        for (let i = 0; i < dim1Size; i++) {
+            for (let j = 0; j < dim2Size; j++) {
+                let pos1 = i;
+                let pos2 = snake ? (i % 2 === 0 ? j : dim2Size - 1 - j) : j;
+
+                pos1 *= tileSize[dim1key];
+                pos2 *= tileSize[dim2key];
+
+                const offset = {
+                    x: 0,
+                    y: 0,
+                    z: 0,
+                    [dim1]: pos1,
+                    [dim2]: pos2,
+                    width: tileSize.width,
+                    height: tileSize.height,
+                    depth: tileSize.depth
+                }
+
+                offsets.push(offset);
+            }
+        }
+
+        const images = await Promise.all(this.tileEntries.map(entry => entry.entry.imagePromise));
+        this.ui.stitchPreview.setImages(images, offsets);
+
+        // Set slice direction
+        if (!stitchDimensions.includes('x')) {
+            this.ui.stitchPreview.setSliceDirection(SliceDirection.X);
+        } else if (!stitchDimensions.includes('y')) {
+            this.ui.stitchPreview.setSliceDirection(SliceDirection.Y);
+        } else if (!stitchDimensions.includes('z')) {
+            this.ui.stitchPreview.setSliceDirection(SliceDirection.Z);
+        }
 
     }
 

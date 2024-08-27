@@ -634,3 +634,43 @@ body {
 .web-stitch .grid-stitch-setup table.tile-table tbody tr.sortable-chosen {
     background-color: rgba(0, 0, 0, 0.1);
 }
+
+.web-stitch .grid-stitch-setup .grid-preview {
+    position: relative;
+    width: 100%;
+    height: 500px;
+}
+
+.web-stitch .grid-stitch-setup .generate-grid-button {
+    padding: 5px 10px;
+    cursor: pointer;
+    background-color: rgba(0, 0, 0, 0.1);
+    transition: background-color 0.15s ease-in-out;
+}
+
+.web-stitch .grid-stitch-setup .generate-grid-button:hover {
+    background-color: rgba(0, 0, 0, 0.2);
+}
+
+.web-stitch .grid-stitch-setup .input-ctn {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 10px;
+}
+
+.web-stitch .grid-stitch-setup .input-ctn label {
+    font-family: -apple-system, "system-ui", sans-serif;
+    font-size: 14px;
+    line-height: 30px;
+}
+
+.web-stitch .grid-stitch-setup .input-ctn input {
+    font-family: -apple-system, "system-ui", sans-serif;
+    font-size: 14px;
+    padding: 5px;
+}
+
+.web-stitch .grid-stitch-setup .button-list {
+    display: flex;
+    gap: 5px;
+}
