@@ -1,13 +1,18 @@
 import { Utils } from "../utils/Utils.mjs";
+import { WorkerMessageHandler } from "../worker/WorkerMessageHandler.mjs";
 import { SliceDirection, Viewer3DSlice } from "./Viewer3D.mjs";
 
+const FuseWorkerPath =  import.meta.resolve('../worker/FuseWorker.mjs');
+const MaxCanvasSize = 4096;
 export class StitchVisualizer {
     constructor(options) {
         this.options = options;
         this.ui = {};
         this.images = [];
         this.viewers = [];
+        this.fusedWorkers = [];
         this.offsets = [];
+        this.offsetCache = {};
         this.centerOffset = { x: 0, y: 0 };
         this.sliceDirection = SliceDirection.Z;
         this.currentSliceFromMiddle = 0;
@@ -15,7 +20,6 @@ export class StitchVisualizer {
         this.directionCache = {};
         this.setupUI();
     }
-
     getCurrentSliceForImage(imageIndex) {
         const bounds = this.getFrameBounds();
         const offset = this.getOffsetForImage(imageIndex);
@@ -35,6 +39,112 @@ export class StitchVisualizer {
             min: minSlice,
             max: maxSlice
         }
+    }
+
+    createFuseWorker() {
+        // Create main canvas
+        const canvas = document.createElement('canvas');
+        canvas.classList.add('main-canvas');
+        canvas.style.display = 'none';
+        this.ui.imagesContainer.appendChild(canvas);
+
+        const fuseWorker = new WorkerMessageHandler(new Worker(FuseWorkerPath,{
+            type: 'module'
+        }));
+
+        const offscreen = canvas.transferControlToOffscreen();
+        fuseWorker.emit('setup~', offscreen, [offscreen]);
+
+        return {
+            worker: fuseWorker,
+            canvas: canvas,
+            offset: { x: 0, y: 0, width: 0, height: 0 }
+        }
+    }
+
+    async renderFused() {
+        const bounds = this.getFrameBounds();
+        const index = this.currentSliceFromMiddle;
+
+        const { width, height } = bounds;
+
+        const numX = Math.ceil(width / MaxCanvasSize);
+        const numY = Math.ceil(height / MaxCanvasSize);
+
+        const canvasWidth = Math.min(width, MaxCanvasSize);
+        const canvasHeight = Math.min(height, MaxCanvasSize);
+
+        const canvasAmount = numX * numY;
+
+        if (this.fusedWorkers.length < canvasAmount) {
+            for (let i = this.fusedWorkers.length; i < canvasAmount; i++) {
+                this.fusedWorkers.push(this.createFuseWorker());
+            }
+        } else if (this.fusedWorkers.length > canvasAmount) {
+            this.fusedWorkers.slice(canvasAmount).forEach(({ worker, canvas }) => {
+                worker.close();
+                canvas.remove();
+            });
+            this.fusedWorkers = this.fusedWorkers.slice(0, canvasAmount);
+        }
+
+        const promises = this.fusedWorkers.map(async ({ worker, canvas, offset }, i) => {
+            const x = i % numX;
+            const y = Math.floor(i / numX);
+            const offsetX = x * MaxCanvasSize;
+            const offsetY = y * MaxCanvasSize;
+            const sizeX = Math.min(width - offsetX, MaxCanvasSize);
+            const sizeY = Math.min(height - offsetY, MaxCanvasSize);
+
+            offset.x = offsetX;
+            offset.y = offsetY;
+            offset.width = sizeX;
+            offset.height = sizeY;
+
+            canvas.style.display = 'none';
+
+            const sliceDatas = [];
+            const offsets = [];
+            const imageBoundsList = [];
+            this.images.forEach((image, i) => {
+                const imageBounds = this.getBoundsForImage(i);
+                const minX = imageBounds.minX - bounds.minX;
+                const minY = imageBounds.minY - bounds.minY;
+                const minZ = imageBounds.minZ - bounds.minZ;
+                // Check if image is within bounds
+                if (minX >= offsetX + sizeX || minX + imageBounds.width <= offsetX || minY >= offsetY + sizeY || minY + imageBounds.height <= offsetY) {
+                    return;
+                }
+
+                // Check if z is within bounds
+                const newIndex = index - minZ + Math.floor(bounds.depth / 2);
+                if (newIndex < 0 || newIndex >= imageBounds.depth) {
+                    return;
+                }
+
+                sliceDatas.push(this.viewers[i].sliceData);
+                offsets.push(this.offsets[i]);
+                imageBoundsList.push(imageBounds);
+            });
+
+            const canvasBounds = {
+                ...bounds,
+                minX: offsetX + bounds.minX,
+                minY: offsetY + bounds.minY,
+                width: sizeX,
+                height: sizeY
+            }
+
+            await worker.emit('render', index, canvasBounds, imageBoundsList, sliceDatas); 
+           
+            if (!this.rerenderFuse) {
+                canvas.style.display = '';   
+            }
+        });
+
+        this.applyTransforms();
+
+        await Promise.all(promises);
     }
 
     setupUI() {
@@ -211,17 +321,24 @@ export class StitchVisualizer {
     }
 
     setImages(images, offsets) {
+        let lastLen = this.images.length;
         const viewers = [];
+        this.images.forEach((image, i) => {
+            this.ui.imagesContainer.removeChild(this.viewers[i].canvas);
+        });
+
         images.forEach((image, i) => {
             const matchedViewer = this.viewers.findIndex(viewer => viewer.image === image);
 
             if (matchedViewer !== -1) {
                 viewers.push(this.viewers[matchedViewer]);
+                this.ui.imagesContainer.appendChild(viewers[matchedViewer].canvas);
             } else {
                 const viewer = new Viewer3DSlice();
-                this.ui.imagesContainer.appendChild(viewer.canvas);
                 viewers.push(viewer);
+                this.ui.imagesContainer.appendChild(viewer.canvas);
             }
+           
 
             const viewer = viewers[i];
             viewer.setImage(image);
@@ -233,9 +350,12 @@ export class StitchVisualizer {
         this.offsets = offsets;
 
         this.invalidateCache();
-        this.centerAndScale();
+        if (lastLen !== this.images.length) {
+            this.centerAndScale();
+        }
         this.setSliceIndex(0, true);
         this.updateSliceSlider();
+        this.requestFusedRender();
     }
 
     invalidateCache() {
@@ -293,11 +413,11 @@ export class StitchVisualizer {
         const { width, height, depth } = this.images[imageIndex];
         switch (this.sliceDirection) {
             case SliceDirection.X:
-                return { minX: z, minY: y, maxX: z + depth, maxY: y + height, width: depth, height: height };
+                return { minX: z, minY: y, maxX: z + depth, maxY: y + height, minZ: x, maxZ: x + width, width: depth, height: height, depth: width };
             case SliceDirection.Y:
-                return { minX: x, minY: z, maxX: x + width, maxY: z + depth, width: width, height: depth };
+                return { minX: x, minY: z, maxX: x + width, maxY: z + depth, minZ: y, maxZ: y + height, width: width, height: depth, depth: height };
             case SliceDirection.Z:
-                return { minX: x, minY: y, maxX: x + width, maxY: y + height, width: width, height: height };
+                return { minX: x, minY: y, maxX: x + width, maxY: y + height, minZ: z, maxZ: z + depth, width: width, height: height, depth: depth };
         }
     }
 
@@ -324,6 +444,7 @@ export class StitchVisualizer {
     async render() {
         const index = this.currentSliceFromMiddle;
         const bounds = this.getFrameBounds();
+        const minZ = bounds.minZ;
         const results = [];
         for (let i = 0; i < this.viewers.length; i++) {
             const viewer = this.viewers[i];
@@ -341,7 +462,6 @@ export class StitchVisualizer {
         if (results.some(result => result === true)) {
             this.ui.sliceIndexDisplay.textContent = `${this.sliceDirection}=${this.currentSliceFromMiddle}/${bounds.depth}`;
 
-            const minZ = bounds.minZ;
             this.viewers.forEach((viewer, i) => {
                 const offset = this.getOffsetForImage(i);
                 const newIndex = index - offset.z + minZ + Math.floor(bounds.depth / 2);
@@ -351,6 +471,12 @@ export class StitchVisualizer {
                     viewer.canvas.style.display = '';
                 }
             });
+        }
+
+     
+        if (this.rerenderFuse) {
+            this.rerenderFuse = false;
+            await this.renderFused();
         }
     }
 
@@ -371,6 +497,14 @@ export class StitchVisualizer {
 
             viewer.canvas.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${this.scale})`;
         }
+
+        this.fusedWorkers.forEach(({ canvas, offset }) => {
+            const { x, y, width, height } = offset;
+            const offsetX = (x - bounds.width / 2 + width / 2) * this.scale + this.centerOffset.x - width / 2;
+            const offsetY = (y - bounds.height / 2 + height / 2) * this.scale + this.centerOffset.y - height / 2;
+            canvas.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${this.scale})`;
+        });
+
     }
 
 
@@ -381,12 +515,20 @@ export class StitchVisualizer {
         this.ui.sliceSlider.value = this.currentSliceFromMiddle;
     }
 
+    requestFusedRender() {
+        this.rerenderFuse = true;
+        this.fusedWorkers.forEach(({ canvas }) => {
+            canvas.style.display = 'none';
+        });
+    }
+
     setSliceIndex(index, updateSlider = false) {
         this.currentSliceFromMiddle = index;
         this.updateOffsets();
         if (updateSlider) {
             this.updateSliceSlider();
         }
+        this.requestFusedRender();
     }
 
     updateOffsets() {
@@ -405,9 +547,11 @@ export class StitchVisualizer {
     }
 
     setSliceDirection(direction) {
+        Object.values(SliceDirection).forEach(dir => {
+            this.ui.sliceDirectionButtons[dir].classList.toggle('active', dir === direction);
+        });
 
         if (this.sliceDirection === direction) {
-            this.centerAndScale();
             return;
         }
 
@@ -420,10 +564,6 @@ export class StitchVisualizer {
 
         this.sliceDirection = direction;
         this.viewers.forEach(viewer => viewer.setSliceDirection(direction));
-        Object.values(SliceDirection).forEach(dir => {
-            this.ui.sliceDirectionButtons[dir].classList.toggle('active', dir === direction);
-        });
-
         this.invalidateCache();
 
         // Restore from cache
@@ -442,6 +582,7 @@ export class StitchVisualizer {
         }
 
         this.updateSliceSlider();
+        this.requestFusedRender();
     }
 
     centerAndScale() {
@@ -479,6 +620,14 @@ export class StitchVisualizer {
             y: (mousePos.y - this.centerOffset.y) / this.scale + halfHeight,
         };
 
+    }
+
+    destroy() {
+        this.viewers.forEach(viewer => viewer.destroy());
+        this.fusedWorkers.forEach(({ worker }) => worker.close());
+
+        this.viewers = [];
+        this.fusedWorkers = [];
     }
 
 

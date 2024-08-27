@@ -149,13 +149,13 @@ export class MessageHandler {
     }
 
     generateProxiedSendFunction(id, useTemp) {
-        return (message) => {
+        return (message, transfer) => {
             this.sendMessage({
                 type: MessageTypes.PROXY,
                 useTemp: useTemp,
                 id,
                 message
-            })
+            }, transfer)
         }
     }
 
@@ -169,6 +169,18 @@ export class MessageHandler {
         if (this.closed) {
             console.error('MessageHandler is closed but tried to emit event', event)
             return Promise.reject('MessageHandler is closed')
+        }
+
+        let transferEnabled = false;
+        let transferArgs = [];
+        if (event.charAt(event.length - 1) === '~') {
+            event = event.slice(0, -1);
+            transferEnabled = true;
+            transferArgs = args[args.length - 1];
+            if (!Array.isArray(transferArgs)) {
+                transferArgs = [transferArgs];
+            }
+            args = args.slice(0, -1);
         }
 
         const id = this.nextRequestId();
@@ -199,7 +211,7 @@ export class MessageHandler {
             event,
             args,
             argFnsIndexes
-        })
+        }, transferEnabled ? transferArgs : undefined)
 
         return new Promise((resolve, reject) => {
             const index = Utils.binarySearch(this.sourceCallbacks, id, (a, b) => a.id - b);
@@ -287,8 +299,8 @@ export class WorkerMessageHandler {
         this.channel.addEventListener('message', this.onMessage.bind(this))
     }
 
-    sendMessage(message) {
-        this.channel.postMessage(message)
+    sendMessage(message, transfer) {
+        this.channel.postMessage(message, transfer)
     }
 
     onMessage(event) {

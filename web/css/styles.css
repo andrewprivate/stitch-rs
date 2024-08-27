@@ -465,10 +465,12 @@ body {
     overflow: hidden;
 }
 
-.web-stitch .stitch-visualizer .image-container .image {
+.web-stitch .stitch-visualizer .image-container .image,
+.web-stitch .stitch-visualizer .image-container .main-canvas {
     position: absolute;
     top: 50%;
     left: 50%;
+    opacity: 0.5;
     image-rendering: optimizeSpeed;             /* STOP SMOOTHING, GIVE ME SPEED  */
     image-rendering: -moz-crisp-edges;          /* Firefox                        */
     image-rendering: -o-crisp-edges;            /* Opera                          */
@@ -478,6 +480,11 @@ body {
     -ms-interpolation-mode: nearest-neighbor;   /* IE8+ */
 }
 
+.web-stitch .stitch-visualizer .image-container .main-canvas {
+    opacity: 1;
+    z-index: 2;
+}
+
 .web-stitch .stitch-visualizer .controls {
     position: absolute;
     bottom: 0px;
@@ -485,8 +492,8 @@ body {
     right: 0;
     height: 35px;
     background-color: rgba(248, 248, 248, 0.4);
+    z-index: 3;
 }
-
 
 .web-stitch .stitch-visualizer .controls input.slice-slider {
     position: absolute;
@@ -528,6 +535,7 @@ body {
     padding: 5px;
     display: flex;
     gap: 5px;
+    z-index: 3;
 }
 
 .web-stitch .stitch-visualizer .info-panel .slice-index-display {
@@ -556,7 +564,7 @@ body {
     left: 0px;
     right: 0px;
     overflow: auto;
-    padding: 0px 20px;
+    padding: 10px 20px;
 }
 
 .web-stitch .grid-stitch-setup .tile-table-scroll {
@@ -637,8 +645,10 @@ body {
 
 .web-stitch .grid-stitch-setup .grid-preview {
     position: relative;
-    width: 100%;
+    min-width: 600px;
+    width: 75%;
     height: 500px;
+    border: 1px solid rgb(221, 221, 221);
 }
 
 .web-stitch .grid-stitch-setup .generate-grid-button {
@@ -655,7 +665,11 @@ body {
 .web-stitch .grid-stitch-setup .input-ctn {
     display: flex;
     gap: 5px;
-    margin-bottom: 10px;
+}
+
+.web-stitch .grid-stitch-setup .input-ctn .slider {
+    width: 50%;
+    min-width: 100px;
 }
 
 .web-stitch .grid-stitch-setup .input-ctn label {
@@ -673,4 +687,15 @@ body {
 .web-stitch .grid-stitch-setup .button-list {
     display: flex;
     gap: 5px;
+}
+
+.web-stitch .grid-stitch-setup .save-button {
+    padding: 5px 10px;
+    cursor: pointer;
+    background-color: rgba(0, 0, 0, 0.1);
+    transition: background-color 0.15s ease-in-out;
+}
+
+.web-stitch .grid-stitch-setup .save-button:hover {
+    background-color: rgba(0, 0, 0, 0.2);
 }
