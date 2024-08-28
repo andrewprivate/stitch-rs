@@ -247,6 +247,7 @@ export class Controller {
 
         console.log(`Extracted ${images.length} images.`);
 
+        return;
         // Find stitch_config.json
         const config_file = this.entries.find(entry => entry.name === "stitch_config.json");
         if (!config_file) {
