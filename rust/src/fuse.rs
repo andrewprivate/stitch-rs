@@ -121,7 +121,7 @@ pub fn fuse_2d(
                     }
                     FuseMode::Linear => {
                         let weight = get_linear_weight_3d(
-                            (image.width, image.height, 0),
+                            (image.width, image.height, 1),
                             (src_x, src_y, 0),
                             1.5,
                         );

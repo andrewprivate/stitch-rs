@@ -422,13 +422,16 @@ fn check_offsets(
         //println!("Diff: {:?} I: {:?} J: {:?} O: {:?}", diff, offset_i, offset_j, peak);
         let dst = (diff.0.powi(2) + diff.1.powi(2) + diff.2.powi(2)).sqrt();
         mean_dst += dst;
-        max_dst = max_dst.max(dst);
 
-        let error = dst * dst * weight;
+        let error = dst * dst;
         mean_error += error;
 
         if error > max_error {
             max_error = error;
+        }
+
+        if dst > max_dst {
+            max_dst = dst;
             worst_pair_index = index;
         }
 

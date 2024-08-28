@@ -771,7 +771,9 @@ export class GridStitchSetup {
         this.gridTiles = this.tileEntries.slice(0, size);
         this.gridOffsets = offsets.slice(0, size);
         const images = await Promise.all(this.gridTiles.map(entry => entry.entry.imagePromise));
-        this.ui.stitchPreview.setImages(images, this.gridOffsets);
+        this.ui.stitchPreview.setImages(images, this.gridOffsets, this.gridTiles.map((tile, i) => {
+            return tile.values[0] + ' - ' + tile.values[1];
+        }));
 
         // Set slice direction
         if (stitchDimensions.length === 2) {

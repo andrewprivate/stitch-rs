@@ -2,7 +2,7 @@ import { Utils } from "../utils/Utils.mjs";
 import { WorkerMessageHandler } from "../worker/WorkerMessageHandler.mjs";
 import { SliceDirection, Viewer3DSlice } from "./Viewer3D.mjs";
 
-const FuseWorkerPath =  import.meta.resolve('../worker/FuseWorker.mjs');
+const FuseWorkerPath = import.meta.resolve('../worker/FuseWorker.mjs');
 const MaxCanvasSize = 4096;
 export class StitchVisualizer {
     constructor(options) {
@@ -12,6 +12,7 @@ export class StitchVisualizer {
         this.viewers = [];
         this.fusedWorkers = [];
         this.offsets = [];
+        this.interactiveTiles = [];
         this.offsetCache = {};
         this.centerOffset = { x: 0, y: 0 };
         this.sliceDirection = SliceDirection.Z;
@@ -48,7 +49,7 @@ export class StitchVisualizer {
         canvas.style.display = 'none';
         this.ui.imagesContainer.appendChild(canvas);
 
-        const fuseWorker = new WorkerMessageHandler(new Worker(FuseWorkerPath,{
+        const fuseWorker = new WorkerMessageHandler(new Worker(FuseWorkerPath, {
             type: 'module'
         }));
 
@@ -135,10 +136,10 @@ export class StitchVisualizer {
                 height: sizeY
             }
 
-            await worker.emit('render', index, canvasBounds, imageBoundsList, sliceDatas); 
-           
+            await worker.emit('render', index, canvasBounds, imageBoundsList, sliceDatas);
+
             if (!this.rerenderFuse) {
-                canvas.style.display = '';   
+                canvas.style.display = '';
             }
         });
 
@@ -297,7 +298,7 @@ export class StitchVisualizer {
             this.ui.positionValueDisplay.textContent = `(${imageCoords.x.toFixed(2)}, ${imageCoords.y.toFixed(2)}): ${value !== null ? value : ''}`;
         });
 
-        this.ui.imagesContainer.tabIndex = 0;
+        this.ui.imagesContainer.tabIndex = -1;
         this.ui.imagesContainer.addEventListener('keydown', (event) => {
             const sliceBounds = this.getSliceBounds();
             if (event.code === 'ArrowLeft') {
@@ -312,7 +313,11 @@ export class StitchVisualizer {
                 this.setSliceDirection(SliceDirection.Z);
             } else if (event.code === 'Space') {
                 this.centerAndScale();
+            } else {
+                return;
             }
+            event.preventDefault();
+            event.stopPropagation();
         });
     }
 
@@ -320,12 +325,83 @@ export class StitchVisualizer {
         return this.ui.container;
     }
 
-    setImages(images, offsets) {
+    createInteractiveTile(i) {
+        const tile = document.createElement('div');
+        tile.classList.add('interactive-tile');
+        tile.dataset.index = i;
+        this.ui.imagesContainer.appendChild(tile);
+        this.interactiveTiles.push(tile);
+
+        // Add tile label
+        const label = document.createElement('div');
+        label.classList.add('tile-label');
+
+        const check = () =>{
+               // Check if label fits inside the container, if not then move it above the tile
+               const tileWidth = tile.offsetWidth;
+               const tileHeight = tile.offsetHeight;
+               const labelWidth = label.offsetWidth;
+               const labelHeight = label.offsetHeight;
+               if (labelWidth > tileWidth || labelHeight > tileHeight) {
+                   label.style.transform = 'translate(0%, -100%)';
+               } else {
+                   label.style.transform = '';
+               }
+        }
+
+        tile.addEventListener('mouseenter', () => {
+            label.textContent = this.imageNames[i] + ': (' + this.offsets[i].x + ', ' + this.offsets[i].y + ', ' + this.offsets[i].z + ')';
+            check();
+
+            // Find all tiles that collide
+            const bounds1 = this.getBoundsForImage(i);
+            this.interactiveTiles.forEach((tile, j) => {
+                if (i === j) {
+                    return;
+                }
+                const bounds2 = this.getBoundsForImage(j);
+                if (bounds1.minX < bounds2.maxX && bounds1.maxX > bounds2.minX && bounds1.minY < bounds2.maxY && bounds1.maxY > bounds2.minY && bounds1.minZ < bounds2.maxZ && bounds1.maxZ > bounds2.minZ) {
+                    tile.classList.add('collide');
+                } else {
+                    tile.classList.remove('collide');
+                }
+            });
+        });
+
+        tile.addEventListener('wheel', (event) => {
+            check();
+        });
+
+        tile.addEventListener('mouseleave', () => {
+            check();
+
+            this.interactiveTiles.forEach(tile => {
+                tile.classList.remove('collide');
+            });
+        });
+
+        tile.appendChild(label);
+    }
+    setImages(images, offsets, names) {
         let lastLen = this.images.length;
         const viewers = [];
         this.images.forEach((image, i) => {
             this.ui.imagesContainer.removeChild(this.viewers[i].canvas);
         });
+
+        this.imageNames = names || [];
+
+        if (this.interactiveTiles.length > images.length) {
+            this.interactiveTiles.slice(images.length).forEach(tile => {
+                this.ui.imagesContainer.removeChild(tile);
+            });
+
+            this.interactiveTiles = this.interactiveTiles.slice(0, images.length);
+        } else if (this.interactiveTiles.length < images.length) {
+            for (let i = this.interactiveTiles.length; i < images.length; i++) {
+                this.createInteractiveTile(i);
+            }
+        }
 
         images.forEach((image, i) => {
             const matchedViewer = this.viewers.findIndex(viewer => viewer.image === image);
@@ -338,12 +414,12 @@ export class StitchVisualizer {
                 viewers.push(viewer);
                 this.ui.imagesContainer.appendChild(viewer.canvas);
             }
-           
+
 
             const viewer = viewers[i];
             viewer.setImage(image);
             viewer.setSliceDirection(this.sliceDirection);
-            
+
         });
         this.viewers = viewers;
         this.images = images;
@@ -473,7 +549,7 @@ export class StitchVisualizer {
             });
         }
 
-     
+
         if (this.rerenderFuse) {
             this.rerenderFuse = false;
             await this.renderFused();
@@ -496,6 +572,13 @@ export class StitchVisualizer {
             const offsetY = (y - midPoint.y + height / 2) * this.scale + this.centerOffset.y - height / 2;
 
             viewer.canvas.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${this.scale})`;
+
+            const interactiveTile = this.interactiveTiles[i];
+            interactiveTile.style.width = width * this.scale + 'px';
+            interactiveTile.style.height = height * this.scale + 'px';
+            const offsetX2 = (x - midPoint.x) * this.scale + this.centerOffset.x;
+            const offsetY2 = (y - midPoint.y) * this.scale + this.centerOffset.y;
+            interactiveTile.style.transform = `translate(${offsetX2}px, ${offsetY2}px)`;
         }
 
         this.fusedWorkers.forEach(({ canvas, offset }) => {
@@ -538,8 +621,10 @@ export class StitchVisualizer {
             const newIndex = this.getCurrentSliceForImage(i);
             if (newIndex < 0 || newIndex >= viewer.getSliceCount()) {
                 viewer.canvas.style.display = 'none';
+                this.interactiveTiles[i].style.display = 'none';
             } else {
                 viewer.setSliceIndex(newIndex);
+                this.interactiveTiles[i].style.display = '';
             }
         });
 

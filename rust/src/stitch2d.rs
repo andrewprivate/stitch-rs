@@ -293,8 +293,8 @@ pub fn stitch(
             {
                 let worst_pair = &mut pairs[worst_pair_index];
                 println!(
-                    "Identified worst pair: {} - {} Offset: {:?} R: {} Error: {}",
-                    worst_pair.i, worst_pair.j, worst_pair.offset, worst_pair.weight, max_error
+                    "Identified worst pair: {} {} - {} Offset: {:?} R: {} Error: {}",
+                    worst_pair_index, worst_pair.i, worst_pair.j, worst_pair.offset, worst_pair.weight, max_error
                 );
 
                 worst_pair.valid = false;
@@ -330,6 +330,7 @@ fn check_offsets(
     let mut max_dst: f32 = 0.0;
     let mut worst_pair_index = 0;
 
+
     let mut n = 0;
     pairs.iter().enumerate().for_each(|(index, pair)| {
         if !pair.valid {
@@ -359,13 +360,16 @@ fn check_offsets(
 
         let dst = (diff.0.powi(2) + diff.1.powi(2)).sqrt();
         mean_dst += dst;
-        max_dst = max_dst.max(dst);
 
         let error = dst * dst * weight;
         mean_error += error;
 
         if error > max_error {
             max_error = error;
+        }
+
+        if dst > max_dst {
+            max_dst = dst;
             worst_pair_index = index;
         }
 

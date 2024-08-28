@@ -480,6 +480,46 @@ body {
     -ms-interpolation-mode: nearest-neighbor;   /* IE8+ */
 }
 
+.web-stitch .stitch-visualizer .image-container .interactive-tile {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    opacity: 0;
+    border: 2px solid rgb(255, 0, 0);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 3;
+    box-sizing: border-box;
+}
+
+.web-stitch .stitch-visualizer .image-container .interactive-tile:hover {
+    opacity: 1;
+    z-index: 4;
+}
+
+.web-stitch .stitch-visualizer .image-container .interactive-tile.collide {
+    opacity: 1;
+    border: 2px solid rgba(0, 255, 0, 0.25);
+}
+
+.web-stitch .stitch-visualizer .image-container .interactive-tile .tile-label {
+    background-color: rgba(255, 255, 255, 0.8);
+    padding: 5px;
+    font-family: -apple-system, "system-ui", sans-serif;
+    font-size: 14px;
+    border: 1px solid rgb(221, 221, 221);
+    pointer-events: none;
+    min-width: fit-content;
+    white-space: nowrap;
+    display: none;
+}
+
+.web-stitch .stitch-visualizer .image-container .interactive-tile:hover .tile-label {
+    display: block;
+}
+
+
 .web-stitch .stitch-visualizer .image-container .main-canvas {
     opacity: 1;
     z-index: 2;
@@ -492,7 +532,7 @@ body {
     right: 0;
     height: 35px;
     background-color: rgba(248, 248, 248, 0.4);
-    z-index: 3;
+    z-index: 10;
 }
 
 .web-stitch .stitch-visualizer .controls input.slice-slider {
@@ -530,12 +570,11 @@ body {
     position: absolute;
     top: 0px;
     left: 0px;
-
     background-color: rgba(255, 255, 255, 0.6);
     padding: 5px;
     display: flex;
     gap: 5px;
-    z-index: 3;
+    z-index: 10;
 }
 
 .web-stitch .stitch-visualizer .info-panel .slice-index-display {
