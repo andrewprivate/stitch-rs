@@ -278,6 +278,12 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
         println!("Use prior: {}", config.use_prior);
     }
 
+    // Check merge
+    if !json.get("merge_subgraphs").is_none() {
+        config.merge_subgraphs = json["merge_subgraphs"].as_bool().unwrap();
+        println!("Merge subgraphs: {}", config.merge_subgraphs);
+    }
+
     // Check prior sigmas
     if !json.get("prior_sigma").is_none() {
         if (json["prior_sigma"].is_array()) {
@@ -297,6 +303,18 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
             config.prior_sigmas = (val, val, val);
         }
         println!("Prior sigmas: {:?}", config.prior_sigmas);
+    }
+
+    // Check absolute error threshold
+    if !json.get("absolute_error_threshold").is_none() {
+        config.absolute_error_threshold = json["absolute_error_threshold"].as_f64().unwrap() as f32;
+        println!("Absolute error threshold: {}", config.absolute_error_threshold);
+    }
+
+    // Check relative error threshold
+    if !json.get("relative_error_threshold").is_none() {
+        config.relative_error_threshold = json["relative_error_threshold"].as_f64().unwrap() as f32;
+        println!("Relative error threshold: {}", config.relative_error_threshold);
     }
 
     // Check output path
