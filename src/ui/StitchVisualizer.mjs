@@ -565,7 +565,7 @@ export class StitchVisualizer {
         // Schedule restash
         this.images.forEach((image, i) => {
             if (!image.stashScheduled()) {
-                image.scheduleStash(5000);
+                image.scheduleStash(10000);
             }
         });
 

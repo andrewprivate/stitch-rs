@@ -124,7 +124,7 @@ export class GrayImage3D {
         if (!this.blob) {
             this.blob = new Blob([this.data], {type: "application/octet-stream"});
         }
-        this.data = null;
+        delete this.data;
         this.status = ImageStatus.STASHED;
 
         return true;
