@@ -267,6 +267,69 @@ export class Controller {
 
         console.log(`Found ${tiles.length} tiles.`);
 
+        // Get offsets
+        const offsets = config.tile_layout.map(offset => {
+            let x = 0;
+            let y = 0;
+            let z = 0;
+            let width = 1;
+            let height = 1;
+            let depth = 1;
+
+            if (offset.length === 2) {
+                [x, y] = offset;
+            } else if (offset.length === 3) {
+                [x, y, z] = offset;
+            } else if (offset.length === 4) {
+                [x, y, width, height] = offset;
+            } else if (offset.length === 6) {
+                [x, y, z, width, height, depth] = offset;
+            } else {
+                throw new Error("Invalid offset format.");
+            }
+
+            return {x, y, z, width, height, depth};
+        });
+
+        if (tiles.length !== offsets.length) {
+            throw new Error("Number of tiles and offsets do not match.");
+        }
+
+        const pane = new ContentPane();
+        pane.setName("Stitch Preview");
+        this.paneCollection.addPane(pane);
+
+        const viewer = new StitchVisualizer();
+
+        this.stitchVisualizer = viewer;
+        
+        const tileImages = await Promise.all(tiles.map(tile => tile.imagePromise));
+
+        pane.getElement().appendChild(viewer.getElement());
+
+        this.addToRenderQueue(viewer);
+
+        pane.on('close', () => {
+            this.removeFromRenderQueue(viewer);
+        });
+
+        pane.on('select', () => {
+            viewer.centerAndScale();
+        });
+
+        viewer.setImages(tileImages, offsets.map((offset)=>{
+            return {
+                x: Math.round(offset.x * tileImages[0].width / offset.width),
+                y: Math.round(offset.y * tileImages[0].height / offset.height),
+                z: Math.round(offset.z * tileImages[0].depth / offset.depth),
+                width: tileImages[0].width,
+                height: tileImages[0].height,
+                depth: tileImages[0].depth
+            }
+        }), tiles.map(tile => tile.name));
+
+        this.tileImages = tileImages;
+
         // Load output/align_values.json
         const output_folder = this.entries.find(entry => entry.name === "output");
         if (!output_folder) {
@@ -326,64 +389,6 @@ export class Controller {
 
             this.subgraphViewers.push(viewer);
         });
-
-        // Get offsets
-
-        // // Get offsets
-        // const offsets = config.tile_layout.map(offset => {
-        //     let x = 0;
-        //     let y = 0;
-        //     let z = 0;
-        //     let width = 1;
-        //     let height = 1;
-        //     let depth = 1;
-
-        //     if (offset.length === 2) {
-        //         [x, y] = offset;
-        //     } else if (offset.length === 3) {
-        //         [x, y, z] = offset;
-        //     } else if (offset.length === 4) {
-        //         [x, y, width, height] = offset;
-        //     } else if (offset.length === 6) {
-        //         [x, y, z, width, height, depth] = offset;
-        //     } else {
-        //         throw new Error("Invalid offset format.");
-        //     }
-
-        //     return {x, y, z, width, height, depth};
-        // });
-
-        // if (tiles.length !== offsets.length) {
-        //     throw new Error("Number of tiles and offsets do not match.");
-        // }
-
-        // const pane = new ContentPane();
-        // pane.setName("Stitch Preview");
-        // this.paneCollection.addPane(pane);
-
-        // const viewer = new StitchVisualizer();
-
-        // this.stitchVisualizer = viewer;
-        
-        // const tileImages = await Promise.all(tiles.map(tile => tile.imagePromise));
-
-        // pane.getElement().appendChild(viewer.getElement());
-
-        // this.addToRenderQueue(viewer);
-
-        // pane.on('close', () => {
-        //     this.removeFromRenderQueue(viewer);
-        // });
-
-        // viewer.setImages(tileImages, offsets.map((offset)=>{
-        //     return {
-        //         x: offset.x * tileImages[0].width / offset.width,
-        //         y: offset.y * tileImages[0].height / offset.height,
-        //         z: offset.z * tileImages[0].depth / offset.depth,
-        //     }
-        // }));
-
-        // this.tileImages = tileImages;
     }
 
     async extractImageFiles(image_files, callbackProgress) {
