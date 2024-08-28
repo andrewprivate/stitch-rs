@@ -966,6 +966,7 @@ export class GridStitchSetup {
 
     async generateGrid() {
         if (this.makingGrid) {
+            this.needToRemakeGrid = true;
             return;
         }
         this.makingGrid = true;
@@ -975,6 +976,11 @@ export class GridStitchSetup {
             console.error(e);
         }
         this.makingGrid = false;
+
+        if (this.needToRemakeGrid) {
+            this.needToRemakeGrid = false;
+            this.generateGrid();
+        }
     }
 
 }
