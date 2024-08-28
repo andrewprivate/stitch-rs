@@ -238,7 +238,7 @@ export class Controller {
         stitchPane.setName("Grid Stitch Setup");
         this.paneCollection.addPane(stitchPane);
 
-    this.stitchSetup = new GridStitchSetup(this);
+        this.stitchSetup = new GridStitchSetup(this);
         stitchPane.getElement().appendChild(this.stitchSetup.getElement());
 
         this.addToRenderQueue(this.stitchSetup);
@@ -247,7 +247,6 @@ export class Controller {
 
         console.log(`Extracted ${images.length} images.`);
 
-        return;
         // Find stitch_config.json
         const config_file = this.entries.find(entry => entry.name === "stitch_config.json");
         if (!config_file) {
@@ -268,61 +267,123 @@ export class Controller {
 
         console.log(`Found ${tiles.length} tiles.`);
 
-        // Get offsets
-        const offsets = config.tile_layout.map(offset => {
-            let x = 0;
-            let y = 0;
-            let z = 0;
-            let width = 1;
-            let height = 1;
-            let depth = 1;
-
-            if (offset.length === 2) {
-                [x, y] = offset;
-            } else if (offset.length === 3) {
-                [x, y, z] = offset;
-            } else if (offset.length === 4) {
-                [x, y, width, height] = offset;
-            } else if (offset.length === 6) {
-                [x, y, z, width, height, depth] = offset;
-            } else {
-                throw new Error("Invalid offset format.");
-            }
-
-            return {x, y, z, width, height, depth};
-        });
-
-        if (tiles.length !== offsets.length) {
-            throw new Error("Number of tiles and offsets do not match.");
+        // Load output/align_values.json
+        const output_folder = this.entries.find(entry => entry.name === "output");
+        if (!output_folder) {
+            console.log("No output folder found.");
+            return;
         }
 
-        const pane = new ContentPane();
-        pane.setName("Stitch Preview");
-        this.paneCollection.addPane(pane);
-
-        const viewer = new StitchVisualizer();
-
-        this.stitchVisualizer = viewer;
+        console.log("Found output folder.", output_folder);
         
-        const tileImages = await Promise.all(tiles.map(tile => tile.imagePromise));
+        const output_folder_entries = await FileUtils.getEntries(await this.fs.getDirectoryHandle("output"));
+        const align_values_file = output_folder_entries.find(entry => entry.name === "align_values.json");
+        if (!align_values_file) {
+            console.log("No align_values.json found.");
+            return;
+        }
 
-        pane.getElement().appendChild(viewer.getElement());
+        const align_values = JSON.parse(await align_values_file.getText());
 
-        this.addToRenderQueue(viewer);
+        console.log("Loaded align_values.json", align_values);
 
-        pane.on('close', () => {
-            this.removeFromRenderQueue(viewer);
+        const offsetsList = align_values.offsets;
+        this.subgraphViewers = [];
+        align_values.subgraphs.forEach(async (subgraph, index) => {
+            const tileImages = await Promise.all(tiles.filter((tile, index) => subgraph.includes(index)).map(tile => tile.imagePromise));
+            const offsets = offsetsList[index].map((offset,i) => {
+                return {
+                    x: Math.round(offset[0] || 0),
+                    y: Math.round(offset[1] || 0),
+                    z: Math.round(offset[2] || 0),
+                    width: tileImages[i].width,
+                    height: tileImages[i].height,
+                    depth: tileImages[i].depth
+                }
+            });
+           
+            const pane = new ContentPane();
+            pane.setName(`Subgraph ${index}`);
+            this.paneCollection.addPane(pane);
+
+            const viewer = new StitchVisualizer();
+            pane.getElement().appendChild(viewer.getElement());
+            this.addToRenderQueue(viewer);
+
+            pane.on('close', () => {
+                this.removeFromRenderQueue(viewer);
+            });
+
+            pane.on('select', () => {
+                viewer.centerAndScale();
+            });
+
+            const names = subgraph.map(index => tiles[index].name);
+            //console.log("Subgraph", tileImages, offsets, names);
+            viewer.setImages(tileImages, offsets, names);
+
+            console.log(`Loaded subgraph ${index}`);
+
+            this.subgraphViewers.push(viewer);
         });
 
-        viewer.setImages(tileImages, offsets.map((offset)=>{
-            return {
-                x: offset.x * tileImages[0].width / offset.width,
-                y: offset.y * tileImages[0].height / offset.height,
-                z: offset.z * tileImages[0].depth / offset.depth,
-            }
-        }));
+        // Get offsets
 
-        this.tileImages = tileImages;
+        // // Get offsets
+        // const offsets = config.tile_layout.map(offset => {
+        //     let x = 0;
+        //     let y = 0;
+        //     let z = 0;
+        //     let width = 1;
+        //     let height = 1;
+        //     let depth = 1;
+
+        //     if (offset.length === 2) {
+        //         [x, y] = offset;
+        //     } else if (offset.length === 3) {
+        //         [x, y, z] = offset;
+        //     } else if (offset.length === 4) {
+        //         [x, y, width, height] = offset;
+        //     } else if (offset.length === 6) {
+        //         [x, y, z, width, height, depth] = offset;
+        //     } else {
+        //         throw new Error("Invalid offset format.");
+        //     }
+
+        //     return {x, y, z, width, height, depth};
+        // });
+
+        // if (tiles.length !== offsets.length) {
+        //     throw new Error("Number of tiles and offsets do not match.");
+        // }
+
+        // const pane = new ContentPane();
+        // pane.setName("Stitch Preview");
+        // this.paneCollection.addPane(pane);
+
+        // const viewer = new StitchVisualizer();
+
+        // this.stitchVisualizer = viewer;
+        
+        // const tileImages = await Promise.all(tiles.map(tile => tile.imagePromise));
+
+        // pane.getElement().appendChild(viewer.getElement());
+
+        // this.addToRenderQueue(viewer);
+
+        // pane.on('close', () => {
+        //     this.removeFromRenderQueue(viewer);
+        // });
+
+        // viewer.setImages(tileImages, offsets.map((offset)=>{
+        //     return {
+        //         x: offset.x * tileImages[0].width / offset.width,
+        //         y: offset.y * tileImages[0].height / offset.height,
+        //         z: offset.z * tileImages[0].depth / offset.depth,
+        //     }
+        // }));
+
+        // this.tileImages = tileImages;
     }
 
     async extractImageFiles(image_files, callbackProgress) {

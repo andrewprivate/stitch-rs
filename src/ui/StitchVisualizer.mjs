@@ -518,6 +518,11 @@ export class StitchVisualizer {
     }
 
     async render() {
+        // Check if viewer is visible
+        if (this.ui.container.offsetParent === null) {
+            return;
+        }
+
         const index = this.currentSliceFromMiddle;
         const bounds = this.getFrameBounds();
         const minZ = bounds.minZ;
