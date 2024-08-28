@@ -11,6 +11,7 @@ export class GrayImage3D {
         this.depth = depth;
         this.data = data;
         this.status = ImageStatus.LOADED_IN_MEMORY;
+        this.unstashPromise = null;
 
         this.xProjection = null;
         this.yProjection = null;
@@ -139,14 +140,43 @@ export class GrayImage3D {
             return false;
         }
 
+        if (this.unstashPromise) {
+            return this.unstashPromise;
+        }
+
+        let resolve, reject;
+        this.unstashPromise = new Promise((r,e) => {
+            resolve = r;
+            reject = e;
+        });
+
         try {
             const buffer = await this.blob.arrayBuffer();
             this.data = new Uint8Array(buffer);
             this.status = ImageStatus.LOADED_IN_MEMORY;
         } catch (e) {
-            console.error("Error unstashing image", e, this);
-            throw e;
+            console.error("Error unstashing image, trying again in 10 sec", e, this);
+
+            await new Promise((resolve) => {
+                setTimeout(resolve, 10000);
+            });
+
+            console.error("Retrying unstashing image", this);
+
+            try {
+                const buffer = await this.blob.arrayBuffer();
+                this.data = new Uint8Array(buffer);
+                this.status = ImageStatus.LOADED_IN_MEMORY;
+            } catch (e) {
+                console.error("Error unstashing image!", e, this);
+                this.unstashPromise = null;
+                reject(e);
+                throw e;
+            }
         }
+
+        this.unstashPromise = null;
+        resolve();
 
         return true;
     }

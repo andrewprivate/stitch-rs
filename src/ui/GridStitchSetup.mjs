@@ -11,6 +11,8 @@ export class GridStitchSetup {
 
         this.tileTableSortCriteria = 1;
         this.tileTableSortDirection = 1;
+        this.reverseX = false;
+        this.reverseY = false;
 
         this.setupUI();
     }
@@ -222,6 +224,29 @@ export class GridStitchSetup {
 
         this.ui.gridType.value = 'snake-by-row';
 
+        // Add button to reverse x and y
+        this.ui.reverseX = document.createElement('button');
+        this.ui.reverseX.className = 'reverse-x';
+        this.ui.reverseX.innerText = 'Reverse X';
+        
+        this.ui.reverseY = document.createElement('button');
+        this.ui.reverseY.className = 'reverse-y';
+        this.ui.reverseY.innerText = 'Reverse Y';
+
+        this.ui.buttonList.appendChild(this.ui.reverseX);
+        this.ui.buttonList.appendChild(this.ui.reverseY);
+
+        this.ui.reverseX.addEventListener('click', () => {
+            this.reverseX = !this.reverseX;
+            this.generateGrid();
+        });
+
+        this.ui.reverseY.addEventListener('click', () => {
+            this.reverseY = !this.reverseY;
+            this.generateGrid();
+        });
+
+
 
         // Add sliders for overlap x, y, and z
         this.ui.overlapX = this.createSliderWithLabel('Overlap X', 0, 100, 1);
@@ -280,12 +305,10 @@ export class GridStitchSetup {
 
         this.ui.overlapX.registerChangeListener(() => {
             this.generateGrid();
-            this.updatePriors();
         });
 
         this.ui.overlapY.registerChangeListener(() => {
             this.generateGrid();
-            this.updatePriors();
         });
 
         // Step 3, setup priors
@@ -447,6 +470,7 @@ export class GridStitchSetup {
         this.priorImage = image;
 
         this.ui.priorPreview.setImage(image);
+        this.ui.priorPreview.setSliceIndex(Math.floor(this.ui.priorPreview.getSliceCount() / 2));
     }
 
     generateStitchConfig() {
@@ -754,9 +778,9 @@ export class GridStitchSetup {
     }
 
     async generateGridInternal() {
-        const gridWidth = Math.max(parseInt(this.ui.gridWidth.input.value), 1);
-        const gridHeight = Math.max(parseInt(this.ui.gridHeight.input.value), 1);
-        const gridDepth = Math.max(parseInt(this.ui.gridDepth.input.value), 1);
+        const gridWidth = Math.max(parseInt(this.ui.gridWidth.input.value), 1) || 1;
+        const gridHeight = Math.max(parseInt(this.ui.gridHeight.input.value), 1) || 1;
+        const gridDepth = Math.max(parseInt(this.ui.gridDepth.input.value), 1) || 1;
 
         // get size
         const size = gridWidth * gridHeight * gridDepth;
@@ -840,14 +864,21 @@ export class GridStitchSetup {
 
         const overlapX = parseInt(this.ui.overlapX.input.value);
         const overlapY = parseInt(this.ui.overlapY.input.value);
+        const reverseX = this.reverseX;
+        const reverseY = this.reverseY;
 
         let dim1Overlap, dim2Overlap;
+        let dim1Reverse, dim2Reverse;
         if (stitchDimensions[0] === 'x' || stitchDimensions[1] === 'y') {
             dim1Overlap = overlapX;
             dim2Overlap = overlapY;
+            dim1Reverse = reverseX;
+            dim2Reverse = reverseY;
         } else if (stitchDimensions[0] === 'y' || stitchDimensions[1] === 'x') {
             dim1Overlap = overlapY;
             dim2Overlap = overlapX;
+            dim1Reverse = reverseY;
+            dim2Reverse = reverseX;
         }
 
         for (let i = 0; i < dim1Size; i++) {
@@ -855,6 +886,14 @@ export class GridStitchSetup {
                 for (let j = 0; j < dim2Size; j++) {
                     let pos1 = i;
                     let pos2 = snake ? (i % 2 === 0 ? j : dim2Size - 1 - j) : j;
+
+                    if (dim1Reverse) {
+                        pos1 = dim1Size - 1 - pos1;
+                    }
+
+                    if (dim2Reverse) {
+                        pos2 = dim2Size - 1 - pos2;
+                    }
 
                     pos1 *= tileSize[dim1key] * (100 - dim1Overlap) / 100;
                     pos2 *= tileSize[dim2key] * (100 - dim2Overlap) / 100;
@@ -874,6 +913,11 @@ export class GridStitchSetup {
                 }
             } else {
                 let pos1 = i;
+
+                if (dim1Reverse) {
+                    pos1 = dim1Size - 1 - pos1;
+                }
+
                 pos1 *= tileSize[dim1key] * (100 - overlapX) / 100;
 
                 const offset = {
@@ -925,7 +969,11 @@ export class GridStitchSetup {
             return;
         }
         this.makingGrid = true;
+        try {
         await this.generateGridInternal();
+        } catch (e) {
+            console.error(e);
+        }
         this.makingGrid = false;
     }
 

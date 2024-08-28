@@ -5,7 +5,7 @@ const WorkerLocation = import.meta.resolve('./ImageParserWorker.mjs');
 
 export class ParallelImageParser {
     constructor() {
-        this.pool = new WorkerPool(WorkerLocation);
+        this.pool = new WorkerPool(WorkerLocation, Math.min(navigator.hardwareConcurrency || 2, 2));
     }
 
     processImageFiles(files, progressCallback) {

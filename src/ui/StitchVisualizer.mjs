@@ -382,7 +382,34 @@ export class StitchVisualizer {
 
         tile.appendChild(label);
     }
-    setImages(images, offsets, names) {
+    setImages(imagesIn, offsetsIn, namesIn) {
+        const images = [];
+        const offsets = [];
+        const names = [];
+
+        imagesIn.forEach((image, i) => {
+            if (!image) {
+                return;
+            }
+
+            const offset = offsetsIn[i];
+            if (!offset) {
+                return;
+            }
+
+            offset.x = Math.round(offset.x);
+            offset.y = Math.round(offset.y);
+            offset.z = Math.round(offset.z);
+            offset.width = Math.round(offset.width);
+            offset.height = Math.round(offset.height);
+            offset.depth = Math.round(offset.depth);
+
+            images.push(image);
+            offsets.push(offset);
+            names.push(namesIn[i]);
+        });
+
+
         let lastLen = this.images.length;
         const viewers = [];
         this.images.forEach((image, i) => {
@@ -429,7 +456,9 @@ export class StitchVisualizer {
         if (lastLen !== this.images.length) {
             this.centerAndScale();
         }
-        this.setSliceIndex(0, true);
+        
+        const sliceBounds = this.getSliceBounds();
+        this.setSliceIndex(Utils.clamp(this.currentSliceFromMiddle, sliceBounds.min, sliceBounds.max), true);
         this.updateSliceSlider();
         this.requestFusedRender();
     }

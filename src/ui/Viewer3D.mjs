@@ -29,8 +29,7 @@ export class Viewer3DSlice {
         if (image === this.image) return;
         this.image = image;
         this.renderCache = {};
-        this.sliceDirection = SliceDirection.Z;
-        this.currentSlice = 0;
+        this.currentSlice = Utils.clamp(this.currentSlice, 0, this.getSliceCount() - 1);
     }
 
     async render(noRestash = false) {

@@ -730,6 +730,18 @@ body {
     gap: 5px;
 }
 
+.web-stitch .grid-stitch-setup .button-list button {
+    padding: 5px 10px;
+    cursor: pointer;
+    background-color: rgba(0, 0, 0, 0.1);
+    transition: background-color 0.15s ease-in-out;
+}
+
+.web-stitch .grid-stitch-setup .button-list button:hover {
+    background-color: rgba(0, 0, 0, 0.2);
+}
+
+
 .web-stitch .grid-stitch-setup .save-button {
     padding: 5px 10px;
     cursor: pointer;
