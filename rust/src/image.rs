@@ -626,7 +626,7 @@ pub fn read_image_2d(file_path: &Path) -> Image2D {
     image
 }
 
-pub fn save_image_2d(file_path: &Path, image: &Image2D) {
+pub fn save_image_2d(file_path: &PathBuf, image: &Image2D) {
     let width = image.width as u32;
     let height = image.height as u32;
     let buffer = image2d_to_u16(image);

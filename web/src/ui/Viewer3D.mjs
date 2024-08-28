@@ -176,9 +176,10 @@ export class Viewer3DSlice {
 
 
 export class Viewer3DSliceWithControls extends Viewer3DSlice {
-    constructor() {
+    constructor(options) {
         super();
         this.ui = {};
+        this.options = options || {};
         this.sliceIndexCache = {};
 
         this.scale = 1;
@@ -257,30 +258,32 @@ export class Viewer3DSliceWithControls extends Viewer3DSlice {
         });
 
         // Hook scroll event for zooming
-        this.ui.imageContainer.addEventListener('wheel', (event) => {
-            if (!this.image) return;
+        if (!this.options.noZoom) {
+            this.ui.imageContainer.addEventListener('wheel', (event) => {
+                if (!this.image) return;
 
-            event.preventDefault();
+                event.preventDefault();
 
-            const mousePos = this.getMousePosInContainer(event);
-            const imageCoords = this.mousePosToImageCoords(mousePos);
+                const mousePos = this.getMousePosInContainer(event);
+                const imageCoords = this.mousePosToImageCoords(mousePos);
 
-            const previousOffset = { x: this.centerOffset.x, y: this.centerOffset.y };
-            const previousScale = this.scale;
+                const previousOffset = { x: this.centerOffset.x, y: this.centerOffset.y };
+                const previousScale = this.scale;
 
-            // Zoom in/out centered on mouse position
-            const zoomFactor = 0.04;
-            const scaleChange = event.deltaY > 0 ? -zoomFactor : (event.deltaY < 0 ? zoomFactor : 0);
-            this.scale *= (1 + scaleChange);
+                // Zoom in/out centered on mouse position
+                const zoomFactor = 0.04;
+                const scaleChange = event.deltaY > 0 ? -zoomFactor : (event.deltaY < 0 ? zoomFactor : 0);
+                this.scale *= (1 + scaleChange);
 
-            // Adjust center offset based on zoom
-            const newImageCoords = this.mousePosToImageCoords(mousePos);
-            this.centerOffset.x += (newImageCoords.x - imageCoords.x) * this.scale;
-            this.centerOffset.y += (newImageCoords.y - imageCoords.y) * this.scale;
+                // Adjust center offset based on zoom
+                const newImageCoords = this.mousePosToImageCoords(mousePos);
+                this.centerOffset.x += (newImageCoords.x - imageCoords.x) * this.scale;
+                this.centerOffset.y += (newImageCoords.y - imageCoords.y) * this.scale;
 
 
-            this.applyTransform();
-        });
+                this.applyTransform();
+            });
+        }
 
         // Hook click and drag for panning
         this.isDragging = false;
@@ -303,16 +306,18 @@ export class Viewer3DSliceWithControls extends Viewer3DSlice {
             document.removeEventListener('mouseup', mouseUpHandler);
         }
 
-        this.ui.imageContainer.addEventListener('mousedown', (event) => {
-            if (!event.button === 0) return; // Only left mouse button
-            if (!this.image) return;
-            this.isDragging = true;
-            startDragPos = { x: event.clientX, y: event.clientY };
-            startDragOffset = { x: this.centerOffset.x, y: this.centerOffset.y };
-
-            document.addEventListener('mousemove', mouseMoveHandler);
-            document.addEventListener('mouseup', mouseUpHandler);
-        });
+        if (!this.options.noPan) {
+            this.ui.imageContainer.addEventListener('mousedown', (event) => {
+                if (!event.button === 0) return; // Only left mouse button
+                if (!this.image) return;
+                this.isDragging = true;
+                startDragPos = { x: event.clientX, y: event.clientY };
+                startDragOffset = { x: this.centerOffset.x, y: this.centerOffset.y };
+    
+                document.addEventListener('mousemove', mouseMoveHandler);
+                document.addEventListener('mouseup', mouseUpHandler);
+            });
+        }
 
         this.ui.imageContainer.addEventListener('mousemove', (event) => {
             if (!this.image) return;
@@ -348,7 +353,11 @@ export class Viewer3DSliceWithControls extends Viewer3DSlice {
                 this.setSliceDirection(SliceDirection.Z);
             } else if (event.code === 'Space') {
                 this.centerAndScale();
+            } else {
+                return;
             }
+            event.preventDefault();
+            event.stopPropagation();
         });
 
     }
@@ -394,13 +403,13 @@ export class Viewer3DSliceWithControls extends Viewer3DSlice {
         // Get width and height of the container
         const containerRect = this.ui.imageContainer.getBoundingClientRect();
         const containerWidth = containerRect.width;
-        const containerHeight = containerRect.height - 40;
+        const containerHeight = Math.max(containerRect.height - 40, 1);
 
         // Calculate scale based on the container size
         this.scale = Math.min(containerWidth / width, containerHeight / height);
 
 
-        this.centerOffset = { x: 0, y: -30 * this.scale }; // Center the image vertically
+        this.centerOffset = { x: 0, y: -17.5 }; // Center the image vertically
 
         this.applyTransform();
     }

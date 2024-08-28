@@ -1,5 +1,8 @@
 use fuse::{fuse_2d, fuse_3d, FuseMode};
-use image::{read_dcm, read_dcm_headers, read_image_2d, read_tiff, read_tiff_headers, save_as_dcm, save_as_dcm_8, save_image_2d, Image2D, Image3D, Image3D8, Image3DFile};
+use image::{
+    read_dcm, read_dcm_headers, read_image_2d, read_tiff, read_tiff_headers, save_as_dcm,
+    save_as_dcm_8, save_image_2d, Image2D, Image3D, Image3D8, Image3DFile,
+};
 use rayon::prelude::*;
 use serde_json::*;
 use std::path::{Path, PathBuf};
@@ -108,6 +111,9 @@ pub struct StitchConfig {
     pub tile_layout: Vec<IBox3D>,
     pub copy_files: bool,
     pub use_phase_correlation: bool,
+    pub use_prior: bool,
+    pub prior_sigmas: (f32, f32, f32),
+    pub merge_subgraphs: bool,
 }
 
 impl StitchConfig {
@@ -128,7 +134,10 @@ impl StitchConfig {
             tile_paths: vec![],
             tile_layout: vec![],
             copy_files: false,
-            use_phase_correlation: true
+            use_phase_correlation: true,
+            use_prior: false,
+            prior_sigmas: (10.0, 10.0, 10.0),
+            merge_subgraphs: true
         }
     }
 }
@@ -263,6 +272,33 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
         println!("No fuse: {}", config.no_fuse);
     }
 
+    // Check prior
+    if !json.get("use_prior").is_none() {
+        config.use_prior = json["use_prior"].as_bool().unwrap();
+        println!("Use prior: {}", config.use_prior);
+    }
+
+    // Check prior sigmas
+    if !json.get("prior_sigma").is_none() {
+        if (json["prior_sigma"].is_array()) {
+            let sigmas = json["prior_sigma"].as_array().unwrap();
+            if sigmas.len() == 2 {
+                config.prior_sigmas.0 = sigmas[0].as_f64().unwrap() as f32;
+                config.prior_sigmas.1 = sigmas[1].as_f64().unwrap() as f32;
+            } else if sigmas.len() == 3 {
+                config.prior_sigmas.0 = sigmas[0].as_f64().unwrap() as f32;
+                config.prior_sigmas.1 = sigmas[1].as_f64().unwrap() as f32;
+                config.prior_sigmas.2 = sigmas[2].as_f64().unwrap() as f32;
+            } else {
+                panic!("Invalid prior sigmas");
+            }
+        } else {
+            let val = json["prior_sigma"].as_f64().unwrap() as f32;
+            config.prior_sigmas = (val, val, val);
+        }
+        println!("Prior sigmas: {:?}", config.prior_sigmas);
+    }
+
     // Check output path
     if !json.get("output_path").is_none() {
         config.output_path = PathBuf::from(json["output_path"].as_str().unwrap());
@@ -312,7 +348,7 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
                 path = base_path.unwrap().join(&path);
             }
             let mut temp = IBox3D::new(0, 0, 0, 1, 1, 1);
-            
+
             if !tile.get("box").is_none() {
                 let box_arr = tile["box"].as_array().unwrap();
                 if box_arr.len() == 2 {
@@ -423,34 +459,40 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
     config
 }
 
-fn stitch_3d(
-    config: StitchConfig,
-) {
+fn stitch_3d(config: StitchConfig) {
     let mut tile_paths = config.tile_paths.clone();
     let mut temp_dir = PathBuf::new();
     if config.copy_files {
-    println!("Copying files to temp directory...");
-    temp_dir = std::env::temp_dir();
-    temp_dir = temp_dir.join("stitch3d");
-    let random: u32 = rand::random();
-    temp_dir = temp_dir.join(format!("temp_{}", random));
-    if !temp_dir.exists() {
-        std::fs::create_dir_all(&temp_dir).unwrap();
-    }
+        println!("Copying files to temp directory...");
+        temp_dir = std::env::temp_dir();
+        temp_dir = temp_dir.join("stitch3d");
+        let random: u32 = rand::random();
+        temp_dir = temp_dir.join(format!("temp_{}", random));
+        if !temp_dir.exists() {
+            std::fs::create_dir_all(&temp_dir).unwrap();
+        }
 
-    tile_paths = 
-        tile_paths.iter().enumerate().map(|(i, path)| {
-            let file_name = path.file_name().unwrap();
-            let temp_path = temp_dir.join(file_name);
-            std::fs::copy(path, temp_path.clone()).unwrap();
-            println!("[{}/{}] Copied file: {:?} to {:?}", i + 1, tile_paths.len(), path, temp_path);
-            temp_path
-        }).collect::<Vec<_>>();
+        tile_paths = tile_paths
+            .iter()
+            .enumerate()
+            .map(|(i, path)| {
+                let file_name = path.file_name().unwrap();
+                let temp_path = temp_dir.join(file_name);
+                std::fs::copy(path, temp_path.clone()).unwrap();
+                println!(
+                    "[{}/{}] Copied file: {:?} to {:?}",
+                    i + 1,
+                    tile_paths.len(),
+                    path,
+                    temp_path
+                );
+                temp_path
+            })
+            .collect::<Vec<_>>();
     }
     println!("Reading files for size information...");
     let start = std::time::Instant::now();
-    let images =
-        tile_paths
+    let images = tile_paths
         .into_par_iter()
         .map(|path| {
             // Check if it exists
@@ -497,7 +539,10 @@ fn stitch_3d(
             config.relative_error_threshold,
             config.absolute_error_threshold,
             config.dimension_mask,
-            config.use_phase_correlation
+            config.use_phase_correlation,
+            config.use_prior,
+            config.prior_sigmas,
+            config.merge_subgraphs,
         );
         println!("Time to find alignment: {:?}", start.elapsed());
         stitched_result = Some(result);
@@ -544,9 +589,7 @@ fn stitch_3d(
     }
 }
 
-fn stitch_2d(
-    config: StitchConfig,
-) {
+fn stitch_2d(config: StitchConfig) {
     println!("Reading files...");
     let start = std::time::Instant::now();
     let images = config
@@ -563,7 +606,7 @@ fn stitch_2d(
     println!("Time to read files: {:?}", start.elapsed());
 
     let mut stitched_result = None;
-    
+
     if !config.alignment_file.is_none() && config.alignment_file.clone().unwrap().exists() {
         let alignment_file = config.alignment_file.unwrap();
         let json_str = std::fs::read_to_string(alignment_file).unwrap();
@@ -590,7 +633,10 @@ fn stitch_2d(
             config.relative_error_threshold,
             config.absolute_error_threshold,
             dim_mask,
-            config.use_phase_correlation
+            config.use_phase_correlation,
+            config.use_prior,
+            (config.prior_sigmas.0, config.prior_sigmas.1),
+            config.merge_subgraphs,
         );
         println!("Time to find alignment: {:?}", start.elapsed());
         stitched_result = Some(result);
@@ -624,9 +670,7 @@ fn stitch_2d(
             );
             let output_file = format!("fused_{}.png", i);
             let buf = config.output_path.join(output_file);
-            let path = buf.as_path();
-
-            save_image_2d(path, &fused_image);
+            save_image_2d(&buf, &fused_image);
         });
 
     println!("Time to fuse images: {:?}", start.elapsed());

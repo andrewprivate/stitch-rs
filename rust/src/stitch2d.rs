@@ -1,6 +1,5 @@
-use std::sync::Mutex;
+use std::{path::PathBuf, sync::Mutex};
 
-use dicom::core::chrono::offset;
 use rayon::prelude::*;
 use rustfft::{num_complex::Complex, num_traits::Zero, FftNum, FftPlanner};
 use serde::{Deserialize, Serialize};
@@ -82,6 +81,17 @@ pub struct Pair2D {
     pub valid: bool,
 }
 
+pub fn guassian_2d(x: f32, y: f32, x0: f32, y0: f32, s0: f32, s1: f32) -> f32 {
+    let x = x as f32 - x0;
+    let y = y as f32 - y0;
+    let x = x * x;
+    let y = y * y;
+    let s0 = s0 * s0;
+    let s1 = s1 * s1;
+    let res = (-0.5 * (x / s0 + y / s1)).exp();
+    res
+}
+
 #[allow(dead_code)]
 pub fn stitch(
     images: &[Image2D],
@@ -93,6 +103,9 @@ pub fn stitch(
     absolute_error_threshold: f32,
     dimension_mask: (bool, bool),
     use_phase_correlation: bool,
+    use_prior: bool,
+    prior_sigmas: (f32, f32),
+    merge_subgraphs: bool,
 ) -> Stitch2DResult {
     let mut overlap_map = create_overlap_map(images, layout);
     println!("Overlap map: {:?}", overlap_map);
@@ -174,7 +187,7 @@ pub fn stitch(
                         rustfft::FftDirection::Inverse,
                     );
 
-                    let image = Image2D {
+                    let mut image = Image2D {
                         width: max_size.0,
                         height: max_size.1,
                         data: phase_corr
@@ -185,26 +198,73 @@ pub fn stitch(
                         max: 0.0,
                     };
 
+                    // Compute prior and apply
+                    if use_prior {
+                        let half_w = max_size.0 as i32 / 2;
+                        let half_h = max_size.1 as i32 / 2;
+                        image.data.iter_mut().enumerate().for_each(|(i, val)| {
+                            let x = (i % max_size.0) as i32;
+                            let y = (i / max_size.0) as i32;
+
+                            let x = if x >= half_w {
+                                x - max_size.0 as i32
+                            } else {
+                                x
+                            };
+
+                            let y = if y >= half_h {
+                                y - max_size.1 as i32
+                            } else {
+                                y
+                            };
+
+                            let prior = guassian_2d(
+                                x as f32,
+                                y as f32,
+                                0.0,
+                                0.0,
+                                prior_sigmas.0,
+                                prior_sigmas.1,
+                            );
+
+                            *val *= prior;
+                        });
+                    }
+
                     let mut peaks = find_peaks_2d(&image, check_peaks)
                         .iter()
                         .flat_map(|peak| disambiguate_2d(max_size.0, max_size.1, *peak))
                         .collect::<Vec<_>>();
 
+                    // Multiply cc by prior
+                    if use_prior {
+                        peaks.iter_mut().for_each(|peak| {
+                            let x = peak.0 as i32;
+                            let y = peak.1 as i32;
+                            peak.2 *= guassian_2d(
+                                x as f32,
+                                y as f32,
+                                0.0,
+                                0.0,
+                                prior_sigmas.0,
+                                prior_sigmas.1,
+                            );
+                        });
+                    }
+
                     // Filter peaks
                     let ratio = 0.75;
                     let max_shift = (
                         (max_size.0 as f32 * ratio) as i64,
-                        (max_size.0 as f32 * ratio) as i64
+                        (max_size.0 as f32 * ratio) as i64,
                     );
-                    
 
                     peaks.retain(|peak| {
-                        peak.0 >= -max_shift.0 &&
-                        peak.0 <= max_shift.0 &&
-                        peak.1 >= -max_shift.1 &&
-                        peak.1 <= max_shift.1
+                        peak.0 >= -max_shift.0
+                            && peak.0 <= max_shift.0
+                            && peak.1 >= -max_shift.1
+                            && peak.1 <= max_shift.1
                     });
-
 
                     // Mask peaks
                     peaks.iter_mut().for_each(|peak| {
@@ -294,7 +354,12 @@ pub fn stitch(
                 let worst_pair = &mut pairs[worst_pair_index];
                 println!(
                     "Identified worst pair: {} {} - {} Offset: {:?} R: {} Error: {}",
-                    worst_pair_index, worst_pair.i, worst_pair.j, worst_pair.offset, worst_pair.weight, max_error
+                    worst_pair_index,
+                    worst_pair.i,
+                    worst_pair.j,
+                    worst_pair.offset,
+                    worst_pair.weight,
+                    max_error
                 );
 
                 worst_pair.valid = false;
@@ -311,13 +376,74 @@ pub fn stitch(
         println!("Redoing optimization");
     }
 
+    // Join subgraphs
+    if merge_subgraphs && subgraphs.len() > 1 {
+        println!("Merging subgraphs");
+        let graph = pairs_to_graph(&pairs, images.len());
+        subgraphs = find_subgraphs(&graph);
+
+        // Iterate through overlap_map
+        overlap_map
+            .iter()
+            .enumerate()
+            .for_each(|(i, overlap_list)| {
+                overlap_list.iter().for_each(|&j| {
+                    // Check if connection crosses a subgraph boundary
+                    let graph_i = subgraphs.iter().position(|subgraph| subgraph.contains(&i));
+
+                    let graph_j = subgraphs.iter().position(|subgraph| subgraph.contains(&j));
+
+                    if graph_i.is_none() || graph_j.is_none() {
+                        panic!("Invalid subgraph");
+                    }
+
+                    let graph_i = graph_i.unwrap();
+                    let graph_j = graph_j.unwrap();
+
+                    if graph_i == graph_j {
+                        return;
+                    }
+
+                    // Calculate relative offset
+                    let offset = (layout[j].x - layout[i].x, layout[j].y - layout[i].y);
+
+                    // Multiply with inverse of overlap ratio
+                    let offset = (
+                        offset.0 as f32 * (1.0 - overlap_ratio.0),
+                        offset.1 as f32 * (1.0 - overlap_ratio.1),
+                    );
+
+                    // Add to pairs
+                    pairs.push(Pair2D {
+                        i,
+                        j,
+                        offset: (offset.0 as i64, offset.1 as i64),
+                        weight: 0.1,
+                        valid: true,
+                    });
+
+                    println!("Added prior pair to link {} to {}: {} {} {:?}", graph_i, graph_j, i, j, offset);
+                })
+            });
+
+        // Recalculate offsets
+        let graph = pairs_to_graph(&pairs, images.len());
+        subgraphs = find_subgraphs(&graph);
+        offsets = subgraphs
+            .iter()
+            .map(|subgraph_indexes| {
+                let subgraph = extract_subgraph(&graph, subgraph_indexes);
+                calculate_offsets_from_graph(&subgraph)
+            })
+            .collect::<Vec<_>>();
+    }
+
     Stitch2DResult {
         pairs,
         subgraphs,
         offsets,
     }
 }
-
 
 fn check_offsets(
     pairs: &[Pair2D],
@@ -329,7 +455,6 @@ fn check_offsets(
     let mut mean_dst: f32 = 0.0;
     let mut max_dst: f32 = 0.0;
     let mut worst_pair_index = 0;
-
 
     let mut n = 0;
     pairs.iter().enumerate().for_each(|(index, pair)| {
@@ -409,7 +534,7 @@ fn get_intersection(
     layout_ref: &IBox2D,
     image_move: &Image2D,
     layout_move: &IBox2D,
-    overlap_ratio: (f32, f32)
+    overlap_ratio: (f32, f32),
 ) -> (Image2D, IBox2D, Image2D, IBox2D) {
     let ref_center = (
         layout_ref.x as f32 + layout_ref.width as f32 / 2.0,
@@ -423,7 +548,10 @@ fn get_intersection(
 
     let diff = (move_center.0 - ref_center.0, move_center.1 - ref_center.1);
 
-    let new_diff = (diff.0 * (1.0 - overlap_ratio.0), diff.1 * (1.0 - overlap_ratio.1));
+    let new_diff = (
+        diff.0 * (1.0 - overlap_ratio.0),
+        diff.1 * (1.0 - overlap_ratio.1),
+    );
 
     let new_center = (ref_center.0 + new_diff.0, ref_center.1 + new_diff.1);
 
@@ -689,7 +817,7 @@ fn find_subgraphs(graph: &StitchGraph2D) -> Vec<Vec<usize>> {
             subgraph.push(node);
 
             for j in 0..graph.num_nodes {
-                if graph.adjacency_matrix[node * graph.num_nodes + j] == 1.0 {
+                if graph.adjacency_matrix[node * graph.num_nodes + j] != 0.0 {
                     stack.push(j);
                 }
             }
@@ -720,7 +848,7 @@ fn solve_linear_system(a: &[f32], b: &[f32], size: usize) -> Vec<f32> {
     for i in 0..size {
         // Find pivot
         let mut max_row = i;
-        for j in i + 1..size {
+        for j in (i + 1)..size {
             if augmented_matrix[j * (size + 1) + i].abs()
                 > augmented_matrix[max_row * (size + 1) + i].abs()
             {
@@ -729,15 +857,23 @@ fn solve_linear_system(a: &[f32], b: &[f32], size: usize) -> Vec<f32> {
         }
 
         // Swap rows
-        augmented_matrix.swap(i * (size + 1), max_row * (size + 1));
+        for j in i..(size + 1) {
+            let temp = augmented_matrix[i * (size + 1) + j];
+            augmented_matrix[i * (size + 1) + j] = augmented_matrix[max_row * (size + 1) + j];
+            augmented_matrix[max_row * (size + 1) + j] = temp;
+        }
 
         // Eliminate
-        for j in i + 1..size {
+        for j in (i + 1)..size {
             let factor =
                 augmented_matrix[j * (size + 1) + i] / augmented_matrix[i * (size + 1) + i];
-            for k in i..size + 1 {
-                augmented_matrix[j * (size + 1) + k] -=
-                    factor * augmented_matrix[i * (size + 1) + k];
+            for k in i..(size + 1) {
+                if i == k {
+                    augmented_matrix[j * (size + 1) + k] = 0.0;
+                } else {
+                    augmented_matrix[j * (size + 1) + k] -=
+                        factor * augmented_matrix[i * (size + 1) + k];
+                }
             }
         }
     }
@@ -745,13 +881,11 @@ fn solve_linear_system(a: &[f32], b: &[f32], size: usize) -> Vec<f32> {
     // Back substitution
     let mut x = vec![0.0; size];
     for i in (0..size).rev() {
-        x[i] = augmented_matrix[i * (size + 1) + size];
-        for j in i + 1..size {
-            x[i] -= augmented_matrix[i * (size + 1) + j] * x[j];
+        x[i] = augmented_matrix[i * (size + 1) + size] / augmented_matrix[i * (size + 1) + i];
+        for j in (0..i).rev() {
+            augmented_matrix[j * (size + 1) + size] -= augmented_matrix[j * (size + 1) + i] * x[i];
         }
-        x[i] /= augmented_matrix[i * (size + 1) + i];
     }
-
     x
 }
 

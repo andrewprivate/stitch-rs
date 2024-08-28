@@ -1,7 +1,8 @@
+import { GrayImage3D } from "../Image.mjs";
 import { Sortable } from "../modules/Sortable.mjs";
 import { Utils } from "../utils/Utils.mjs";
 import { StitchVisualizer } from "./StitchVisualizer.mjs";
-import { SliceDirection } from "./Viewer3D.mjs";
+import { SliceDirection, Viewer3DSliceWithControls } from "./Viewer3D.mjs";
 
 export class GridStitchSetup {
     constructor(controller) {
@@ -279,33 +280,82 @@ export class GridStitchSetup {
 
         this.ui.overlapX.registerChangeListener(() => {
             this.generateGrid();
+            this.updatePriors();
         });
 
         this.ui.overlapY.registerChangeListener(() => {
             this.generateGrid();
+            this.updatePriors();
         });
 
-
-        // Step 3
+        // Step 3, setup priors
         this.ui.step3 = document.createElement('div');
         this.ui.step3.className = 'step3';
         this.ui.container.appendChild(this.ui.step3);
 
         this.ui.step3Title = document.createElement('h2');
-        this.ui.step3Title.innerText = 'Step 3: Save Configuration';
+        this.ui.step3Title.innerText = 'Step 3: Set Prior Distribution';
         this.ui.step3.appendChild(this.ui.step3Title);
+
+        // Add slider for sigmaX and sigmaY
+        this.ui.sigmaX = this.createSliderWithLabel('Sigma X', 1, 100, 1);
+        this.ui.step3.appendChild(this.ui.sigmaX.inputCtn);
+
+        this.ui.sigmaY = this.createSliderWithLabel('Sigma Y', 1, 100, 1);
+        this.ui.step3.appendChild(this.ui.sigmaY.inputCtn);
+
+        this.ui.sigmaZ = this.createSliderWithLabel('Sigma Z', 1, 100, 1);
+        this.ui.step3.appendChild(this.ui.sigmaZ.inputCtn);
+
+        this.ui.sigmaX.setValue(1);
+        this.ui.sigmaY.setValue(1);
+        this.ui.sigmaZ.setValue(1);
+
+        this.ui.sigmaX.registerChangeListener(() => {
+            this.updatePriors();
+        });
+
+        this.ui.sigmaY.registerChangeListener(() => {
+            this.updatePriors();
+        });
+
+        this.ui.sigmaZ.registerChangeListener(() => {
+            this.updatePriors();
+        });
+
+        // Add prior preview
+        this.ui.priorPreviewCtn = document.createElement('div');
+        this.ui.priorPreviewCtn.className = 'prior-preview-ctn';
+        this.ui.step3.appendChild(this.ui.priorPreviewCtn);
+
+        this.ui.priorPreview = new Viewer3DSliceWithControls({
+            noZoom: true,
+            noPan: true,
+        });
+        this.ui.priorPreviewCtn.appendChild(this.ui.priorPreview.getElement());
+        this.updatePriors();
+
+
+        // Step 4
+        this.ui.step4 = document.createElement('div');
+        this.ui.step4.className = 'step4';
+        this.ui.container.appendChild(this.ui.step4);
+
+        this.ui.step4Title = document.createElement('h2');
+        this.ui.step4Title.innerText = 'Step 4: Save Configuration';
+        this.ui.step4.appendChild(this.ui.step4Title);
 
         // Add save stitch_config.json button
         this.ui.saveButton = document.createElement('button');
         this.ui.saveButton.className = 'save-button';
         this.ui.saveButton.innerText = 'Save stitch_config.json';
-        this.ui.step3.appendChild(this.ui.saveButton);
+        this.ui.step4.appendChild(this.ui.saveButton);
 
         // Add save TileConfiguration.txt button
         this.ui.saveTileConfigButton = document.createElement('button');
         this.ui.saveTileConfigButton.className = 'save-button';
         this.ui.saveTileConfigButton.innerText = 'Save TileConfiguration.txt';
-        this.ui.step3.appendChild(this.ui.saveTileConfigButton);
+        this.ui.step4.appendChild(this.ui.saveTileConfigButton);
 
         this.ui.saveButton.addEventListener('click', (e) => {
             const stitchConfig = this.generateStitchConfig();
@@ -337,10 +387,72 @@ export class GridStitchSetup {
         });
     }
 
+    calc_guassian(x, y, z, x0, y0, z0, s0, s1, s2) {
+        const dx = x - x0;
+        const dy = y - y0;
+        const dz = z - z0;
+        let res = Math.exp(-0.5 * (dx * dx / s0 / s0 + dy * dy / s1 / s1 + dz * dz / s2 / s2));
+        
+        return res;
+    }
+
+    async updatePriors() {
+        await Promise.all(this.tileEntries.map(entry => entry.entry.imagePromise));
+        const totalWidth = this.tileEntries.reduce((acc, entry) => acc + entry.values[2], 0);
+        const totalHeight = this.tileEntries.reduce((acc, entry) => acc + entry.values[3], 0);
+        const totalDepth = this.tileEntries.reduce((acc, entry) => acc + entry.values[4], 0);
+
+        let averageWidth = totalWidth / this.tileEntries.length;
+        let averageHeight = totalHeight / this.tileEntries.length;
+        let averageDepth = totalDepth / this.tileEntries.length;
+
+        const overlapX = parseInt(this.ui.overlapX.input.value);
+        const overlapY = parseInt(this.ui.overlapY.input.value);
+        let overlap = Math.max(overlapX, overlapY);
+
+        if (overlap === 0) {
+            overlap = 100;
+        }
+
+        const sigmaX = parseFloat(this.ui.sigmaX.input.value);
+        const sigmaY = parseFloat(this.ui.sigmaY.input.value);
+        const sigmaZ = parseFloat(this.ui.sigmaZ.input.value);
+
+        const width = Math.ceil(averageWidth * overlap / 100);
+        const height = Math.ceil(averageHeight * overlap / 100);
+        const depth = Math.ceil(averageDepth * overlap / 100);
+
+        
+        if (width * height * depth === 0) {
+            return;
+        }
+
+        const imageData = new Uint8Array(width * height * depth);
+        for (let z = 0; z < depth; z++) {
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const value = this.calc_guassian(x, y, z, width / 2, height / 2, depth / 2, sigmaX, sigmaY, sigmaZ);
+                    imageData[z * width * height + y * width + x] = value * 255;
+                }
+            }
+        }
+
+        const image = new GrayImage3D({
+            width,
+            height,
+            depth,
+            data: imageData
+        })
+
+        this.priorImage = image;
+
+        this.ui.priorPreview.setImage(image);
+    }
+
     generateStitchConfig() {
         const obj = {
             version: "1.0.0",
-            overlap: 0
+            overlap_ratio: 0
         }
 
         const tiles = this.gridTiles;
@@ -379,6 +491,15 @@ export class GridStitchSetup {
         obj["tile_layout"] = offsets.map((offset, i) => {
             return [offset.x, offset.y, offset.z, offset.width, offset.height, offset.depth];
         });
+
+        const priorX = parseFloat(this.ui.sigmaX.input.value);
+        const priorY = parseFloat(this.ui.sigmaY.input.value);
+        const priorZ = parseFloat(this.ui.sigmaZ.input.value);
+
+        if (priorX > 1 || priorY > 1 || priorZ > 1) {
+            obj["use_prior"] = true;
+            obj["prior_sigma"] = [priorX, priorY, priorZ];
+        }
 
         return JSON.stringify(obj, null, 4);
     }
@@ -628,6 +749,7 @@ export class GridStitchSetup {
     async render() {
 
         await this.ui.stitchPreview.render();
+        await this.ui.priorPreview.render();
 
     }
 
@@ -795,10 +917,6 @@ export class GridStitchSetup {
             } else if (bounds.depth === smallestDim) {
                 this.ui.stitchPreview.setSliceDirection(SliceDirection.Z);
             }
-        }
-
-        if (this.ui.stitchPreview.centerOffset.x === 0 && this.ui.stitchPreview.centerOffset.y === 0) {
-            this.ui.stitchPreview.centerAndScale();
         }
     }
 

@@ -682,7 +682,9 @@ body {
     background-color: rgba(0, 0, 0, 0.1);
 }
 
-.web-stitch .grid-stitch-setup .grid-preview {
+.web-stitch .grid-stitch-setup .grid-preview,
+.web-stitch .grid-stitch-setup .prior-preview-ctn
+{
     position: relative;
     min-width: 600px;
     width: 75%;

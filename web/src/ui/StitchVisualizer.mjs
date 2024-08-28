@@ -676,11 +676,11 @@ export class StitchVisualizer {
         // Get width and height of the container
         const containerRect = this.ui.imagesContainer.getBoundingClientRect();
         const containerWidth = containerRect.width;
-        const containerHeight = Math.max(containerRect.height - 40, 0);
+        const containerHeight = Math.max(containerRect.height - 40, 1);
 
         // Calculate scale based on the container size
         this.scale = Math.min(containerWidth / width, containerHeight / height);
-        this.centerOffset = { x: 0, y: -30 * this.scale }; // Center the image vertically
+        this.centerOffset = { x: 0, y: -17.5 }; // Center the image vertically
 
         this.applyTransforms();
     }
