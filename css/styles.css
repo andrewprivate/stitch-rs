@@ -503,7 +503,12 @@ body {
     border: 2px solid rgba(0, 255, 0, 0.25);
 }
 
+.web-stitch .stitch-visualizer .image-container.editing .interactive-tile {
+    display: none;
+}
+
 .web-stitch .stitch-visualizer .image-container .interactive-tile.editing {
+    display: flex;
     opacity: 1;
     border: 2px solid rgba(0, 0, 255, 0.25);
 }
@@ -528,6 +533,7 @@ body {
 .web-stitch .stitch-visualizer .image-container .main-canvas {
     opacity: 1;
     z-index: 2;
+    transition: opacity 0.15s ease-in-out;
 }
 
 .web-stitch .stitch-visualizer .controls {

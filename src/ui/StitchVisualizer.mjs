@@ -47,7 +47,7 @@ export class StitchVisualizer {
         // Create main canvas
         const canvas = document.createElement('canvas');
         canvas.classList.add('main-canvas');
-        canvas.style.display = 'none';
+        canvas.style.opacity = 0;
         this.ui.imagesContainer.appendChild(canvas);
 
         const fuseWorker = new WorkerMessageHandler(new Worker(FuseWorkerPath, {
@@ -103,7 +103,7 @@ export class StitchVisualizer {
             offset.width = sizeX;
             offset.height = sizeY;
 
-            canvas.style.display = 'none';
+            canvas.style.opacity = 0;
 
             const sliceDatas = [];
             const offsets = [];
@@ -140,7 +140,7 @@ export class StitchVisualizer {
             await worker.emit('render', index, canvasBounds, imageBoundsList, sliceDatas);
 
             if (!this.rerenderFuse) {
-                canvas.style.display = '';
+                canvas.style.opacity = 1;
             }
         });
 
@@ -405,6 +405,7 @@ export class StitchVisualizer {
         this.isEditing = false;
         this.editingTile.removeEventListener('mousedown', this.mouseDownListener);
         this.editingTile.classList.remove('editing');
+        this.ui.imagesContainer.classList.remove('editing');
         this.editingTile = null;
     }
 
@@ -456,6 +457,7 @@ export class StitchVisualizer {
         this.mouseDownListener = mouseDownListener;
         this.editingTile = this.interactiveTiles[i];
         this.editingTile.classList.add('editing');
+        this.ui.imagesContainer.classList.add('editing');
         this.interactiveTiles[i].addEventListener('mousedown', mouseDownListener);
     }
 
@@ -735,7 +737,7 @@ export class StitchVisualizer {
     requestFusedRender() {
         this.rerenderFuse = true;
         this.fusedWorkers.forEach(({ canvas }) => {
-            canvas.style.display = 'none';
+            canvas.style.opacity = 0;
         });
     }
 
