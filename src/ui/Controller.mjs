@@ -416,6 +416,5 @@ export class Controller {
             image.viewer = viewer; // Store reference to viewer in image
         });
     }
-
     
 }

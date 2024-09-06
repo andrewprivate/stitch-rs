@@ -71,7 +71,7 @@ export class GridStitchSetup {
             input.value = valueInput.value;
             changeListeners.forEach(fn => fn());
         });
-        
+
 
         return {
             inputCtn,
@@ -228,7 +228,7 @@ export class GridStitchSetup {
         this.ui.reverseX = document.createElement('button');
         this.ui.reverseX.className = 'reverse-x';
         this.ui.reverseX.innerText = 'Reverse X';
-        
+
         this.ui.reverseY = document.createElement('button');
         this.ui.reverseY.className = 'reverse-y';
         this.ui.reverseY.innerText = 'Reverse Y';
@@ -382,7 +382,7 @@ export class GridStitchSetup {
 
         this.ui.saveButton.addEventListener('click', (e) => {
             const stitchConfig = this.generateStitchConfig();
-            const blob = new Blob([stitchConfig], {type: 'application/json'});
+            const blob = new Blob([stitchConfig], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             document.body.appendChild(a);
@@ -397,7 +397,7 @@ export class GridStitchSetup {
 
         this.ui.saveTileConfigButton.addEventListener('click', (e) => {
             const tileConfig = this.generateTileConfiguration();
-            const blob = new Blob([tileConfig], {type: 'text/plain'});
+            const blob = new Blob([tileConfig], { type: 'text/plain' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             document.body.appendChild(a);
@@ -415,7 +415,7 @@ export class GridStitchSetup {
         const dy = y - y0;
         const dz = z - z0;
         let res = Math.exp(-0.5 * (dx * dx / s0 / s0 + dy * dy / s1 / s1 + dz * dz / s2 / s2));
-        
+
         return res;
     }
 
@@ -445,7 +445,7 @@ export class GridStitchSetup {
         const height = Math.ceil(averageHeight * overlap / 100);
         const depth = Math.ceil(averageDepth * overlap / 100);
 
-        
+
         if (width * height * depth === 0) {
             return;
         }
@@ -531,7 +531,7 @@ export class GridStitchSetup {
     generateTileConfiguration() {
         const lines = [];
         lines.push("# Define the number of dimensions we are working on");
-        
+
         const tiles = this.gridTiles;
         const offsets = this.gridOffsets;
 
@@ -571,9 +571,9 @@ export class GridStitchSetup {
             const positions = [];
 
             if (hasX && hasY && !hasZ) {
-                positions.push(`${offset.x.toFixed(1)}`,`${offset.y.toFixed(1)}`);
+                positions.push(`${offset.x.toFixed(1)}`, `${offset.y.toFixed(1)}`);
             } else {
-                positions.push(`${offset.x.toFixed(1)}`,`${offset.y.toFixed(1)}`,`${offset.z.toFixed(1)}`);
+                positions.push(`${offset.x.toFixed(1)}`, `${offset.y.toFixed(1)}`, `${offset.z.toFixed(1)}`);
             }
 
             lines.push(`${tileName}; ; (${positions.join(',')})`);
@@ -869,16 +869,26 @@ export class GridStitchSetup {
 
         let dim1Overlap, dim2Overlap;
         let dim1Reverse, dim2Reverse;
-        if (stitchDimensions[0] === 'x' || stitchDimensions[1] === 'y') {
-            dim1Overlap = overlapX;
-            dim2Overlap = overlapY;
-            dim1Reverse = reverseX;
-            dim2Reverse = reverseY;
-        } else if (stitchDimensions[0] === 'y' || stitchDimensions[1] === 'x') {
-            dim1Overlap = overlapY;
-            dim2Overlap = overlapX;
-            dim1Reverse = reverseY;
-            dim2Reverse = reverseX;
+        if (dim2Size) {
+            if (stitchDimensions[0] === 'x' || stitchDimensions[1] === 'y') {
+                dim1Overlap = overlapX;
+                dim2Overlap = overlapY;
+                dim1Reverse = reverseX;
+                dim2Reverse = reverseY;
+            } else if (stitchDimensions[0] === 'y' || stitchDimensions[1] === 'x') {
+                dim1Overlap = overlapY;
+                dim2Overlap = overlapX;
+                dim1Reverse = reverseY;
+                dim2Reverse = reverseX;
+            }
+        } else {
+            if (stitchDimensions[0] === 'x') {
+                dim1Overlap = overlapX;
+                dim1Reverse = reverseX;
+            } else {
+                dim1Overlap = overlapY;
+                dim1Reverse = reverseY;
+            }
         }
 
         for (let i = 0; i < dim1Size; i++) {
@@ -918,7 +928,7 @@ export class GridStitchSetup {
                     pos1 = dim1Size - 1 - pos1;
                 }
 
-                pos1 *= tileSize[dim1key] * (100 - overlapX) / 100;
+                pos1 *= tileSize[dim1key] * (100 - dim1Overlap) / 100;
 
                 const offset = {
                     x: 0,
@@ -953,14 +963,20 @@ export class GridStitchSetup {
         } else {
             // Get smallest dim
             const bounds = this.ui.stitchPreview.getStitchedBounds();
-            const smallestDim = Math.min(bounds.width, bounds.height, bounds.depth);
-            if (bounds.width === smallestDim) {
-                this.ui.stitchPreview.setSliceDirection(SliceDirection.X);
-            } else if (bounds.height === smallestDim) {
-                this.ui.stitchPreview.setSliceDirection(SliceDirection.Y);
-            } else if (bounds.depth === smallestDim) {
-                this.ui.stitchPreview.setSliceDirection(SliceDirection.Z);
+            let smallestDim;
+
+            const smallestDimSize = Math.min(hasWidth ? Infinity : bounds.width, hasHeight ? Infinity : bounds.height, hasDepth ? Infinity : bounds.depth);
+            if (smallestDimSize === bounds.width) {
+                smallestDim = SliceDirection.X;
+            } else if (smallestDimSize === bounds.height) {
+                smallestDim = SliceDirection.Y;
+            } else if (smallestDimSize === bounds.depth) {
+                smallestDim = SliceDirection.Z;
             }
+
+
+            if (smallestDim) this.ui.stitchPreview.setSliceDirection(smallestDim);
+
         }
     }
 
@@ -971,7 +987,7 @@ export class GridStitchSetup {
         }
         this.makingGrid = true;
         try {
-        await this.generateGridInternal();
+            await this.generateGridInternal();
         } catch (e) {
             console.error(e);
         }

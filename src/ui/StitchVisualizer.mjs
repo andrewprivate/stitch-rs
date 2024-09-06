@@ -18,6 +18,7 @@ export class StitchVisualizer {
         this.sliceDirection = SliceDirection.Z;
         this.currentSliceFromMiddle = 0;
         this.scale = 1;
+        this.isEditing = false;
         this.directionCache = {};
         this.setupUI();
     }
@@ -255,6 +256,9 @@ export class StitchVisualizer {
         }
         if (!this.options?.noPan) {
             this.ui.imagesContainer.addEventListener('mousedown', (event) => {
+                if (this.isEditing) {
+                    return;
+                }
                 if (!event.button === 0) return; // Only left mouse button
                 this.isDragging = true;
                 startDragPos = { x: event.clientX, y: event.clientY };
@@ -380,8 +384,82 @@ export class StitchVisualizer {
             });
         });
 
+        // When double clicked, enter edit mode which can be used to adjust tile position
+        
+        tile.addEventListener('dblclick', (e) => {
+            if (this.isEditing) {
+                this.endEditMode();
+            } else {
+                this.startEditMode(i, e);
+            }
+        });
+
         tile.appendChild(label);
     }
+
+    endEditMode() {
+        if (!this.isEditing) {
+            return;
+        }
+
+        this.isEditing = false;
+        this.editingTile.removeEventListener('mousedown', this.mouseDownListener);
+        this.editingTile.classList.remove('editing');
+        this.editingTile = null;
+    }
+
+    startEditMode(i, event) {
+        if (this.isEditing) {
+            return;
+        }
+
+        this.isEditing = true;
+
+        let moveListener, mouseUpListener;
+        let currentPos, currentMousePos;
+
+
+        moveListener = (event) => {
+            const offsetX = event.clientX - currentMousePos.x;
+            const offsetY = event.clientY - currentMousePos.y;
+
+            const newx = Math.round(currentPos.x + offsetX / this.scale);
+            const newy = Math.round(currentPos.y + offsetY / this.scale);
+
+            this.setOffsetForImage(i, { x: newx, y: newy });
+
+            this.updateOffsets();
+            this.requestFusedRender();
+
+            event.preventDefault();
+        }
+
+
+        mouseUpListener = (event) => {
+            document.removeEventListener('mousemove', moveListener);
+            document.removeEventListener('mouseup', mouseUpListener);
+        }
+
+        const mouseDownListener = (event) => {
+            if (event.button !== 0) {
+                return;
+            }
+
+            const offset = this.getOffsetForImage(i);
+            currentPos = { x: offset.x, y: offset.y };
+            currentMousePos = { x: event.clientX, y: event.clientY };
+
+            document.addEventListener('mousemove', moveListener);
+            document.addEventListener('mouseup', mouseUpListener);
+        }
+        
+        this.mouseDownListener = mouseDownListener;
+        this.editingTile = this.interactiveTiles[i];
+        this.editingTile.classList.add('editing');
+        this.interactiveTiles[i].addEventListener('mousedown', mouseDownListener);
+    }
+
+
     setImages(imagesIn, offsetsIn, namesIn) {
         const images = [];
         const offsets = [];
@@ -497,6 +575,28 @@ export class StitchVisualizer {
 
         this.cachedBounds = { minX, minY, minZ, maxX, maxY, maxZ, width: maxX - minX, height: maxY - minY, depth: maxZ - minZ };
         return this.cachedBounds;
+    }
+
+    setOffsetForImage(imageIndex, newoff) {
+        const direction = this.sliceDirection;
+        const offsets = this.offsets[imageIndex];
+        switch (direction) {
+            case SliceDirection.X:
+                if (newoff.x !== undefined) offsets.z = newoff.x;
+                if (newoff.y !== undefined) offsets.y = newoff.y;
+                if (newoff.z !== undefined) offsets.x = newoff.z;
+                break;
+            case SliceDirection.Y:
+                if (newoff.x !== undefined) offsets.x = newoff.x;
+                if (newoff.y !== undefined) offsets.z = newoff.y;
+                if (newoff.z !== undefined) offsets.y = newoff.z;
+                break;
+            case SliceDirection.Z:
+                if (newoff.x !== undefined) offsets.x = newoff.x;
+                if (newoff.y !== undefined) offsets.y = newoff.y;
+                if (newoff.z !== undefined) offsets.z = newoff.z;
+                break;
+        }
     }
 
     getOffsetForImage(imageIndex) {

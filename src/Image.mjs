@@ -205,19 +205,30 @@ export class GrayImage3D {
         const buffer = await file.arrayBuffer();
         if (ext === "dcm") {
             const view = new DataView(buffer);
-            const {daikon} = await import("./modules/daikon.mjs");
-            const image = daikon.Series.parseImage(view);
+            const {Daikon} = await import("./modules/daikon.mjs");
+            let image = Daikon.Series.parseImage(view);
             if (image === null) {
                 throw new Error("Could not parse DICOM image");
             }
             
-            const series = new daikon.Series();
 
-            series.addImage(image);
+            const numFrames = image.getNumberOfFrames();
+            const {
+                data,
+                min,
+                max,
+                numCols,
+                numRows
+            } = image.getInterpretedData(false, true);
 
-            series.buildSeries();
+            image = null;
 
-            return series
+            const newData = new Uint8Array(numCols * numRows * numFrames);
+            for (let i = 0; i < newData.length; i++) {
+                newData[i] = (data[i] - min) / (max - min) * 255;
+            }
+
+            return new GrayImage3D({width: numCols, height: numRows, depth: numFrames, data: newData});
         } else if (ext === 'tiff' || ext === 'tif') {
             const {UTIF} = await import("./modules/utif.mjs");
             const ifds = UTIF.decode(buffer);
