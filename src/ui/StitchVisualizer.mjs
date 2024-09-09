@@ -660,16 +660,16 @@ export class StitchVisualizer {
         const results = [];
         for (let i = 0; i < this.viewers.length; i++) {
             const viewer = this.viewers[i];
-            let result = await viewer.render(true)
+            let result = await viewer.render()
             results.push(result);
         }
 
-        // Schedule restash
-        this.images.forEach((image, i) => {
-            if (!image.stashScheduled()) {
-                image.scheduleStash(10000);
-            }
-        });
+        // // Schedule restash
+        // this.images.forEach((image, i) => {
+        //     if (!image.stashScheduled()) {
+        //         image.scheduleStash(10000);
+        //     }
+        // });
 
         if (results.some(result => result === true)) {
             this.ui.sliceIndexDisplay.textContent = `${this.sliceDirection}=${this.currentSliceFromMiddle}/${bounds.depth}`;
