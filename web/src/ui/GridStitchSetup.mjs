@@ -269,6 +269,10 @@ export class GridStitchSetup {
 
         // this.ui.step2.appendChild(this.ui.generateGridButton);
 
+        this.ui.otherButtonList = document.createElement('div');
+        this.ui.otherButtonList.className = 'button-list';
+        this.ui.step2.appendChild(this.ui.otherButtonList);
+
         // Add select for fuse mode
         const fuseModes = [
             'linear',
@@ -281,7 +285,12 @@ export class GridStitchSetup {
 
         this.ui.fuseMode = document.createElement('select');
         this.ui.fuseMode.className = 'fuse-mode';
-        this.ui.step2.appendChild(this.ui.fuseMode);
+
+        // Add label
+        const fuseModeLabel = document.createElement('label');
+        fuseModeLabel.innerText = 'Fuse Mode';
+        this.ui.otherButtonList.appendChild(fuseModeLabel);
+        this.ui.otherButtonList.appendChild(this.ui.fuseMode);
 
         fuseModes.forEach(mode => {
             const option = document.createElement('option');
@@ -468,9 +477,12 @@ export class GridStitchSetup {
         const sigmaY = parseFloat(this.ui.sigmaY.input.value);
         const sigmaZ = parseFloat(this.ui.sigmaZ.input.value);
 
-        const width = Math.ceil(averageWidth * overlap / 100);
-        const height = Math.ceil(averageHeight * overlap / 100);
-        const depth = Math.ceil(averageDepth * overlap / 100);
+        // const width = Math.ceil(averageWidth * overlap / 100);
+        // const height = Math.ceil(averageHeight * overlap / 100);
+        // const depth = Math.ceil(averageDepth * overlap / 100);
+        const width = 150;
+        const height = 150;
+        const depth = 150;
 
 
         if (width * height * depth === 0) {

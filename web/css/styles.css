@@ -725,7 +725,7 @@ body {
     min-width: 100px;
 }
 
-.web-stitch .grid-stitch-setup .input-ctn label {
+.web-stitch .grid-stitch-setup label {
     font-family: -apple-system, "system-ui", sans-serif;
     font-size: 14px;
     line-height: 30px;
