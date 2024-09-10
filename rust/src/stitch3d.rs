@@ -65,6 +65,34 @@ impl IBox3D {
 
         false
     }
+    pub fn get_center(self: &IBox3D) -> (f32, f32, f32) {
+        (
+            self.x as f32 + self.width as f32 / 2.0,
+            self.y as f32 + self.height as f32 / 2.0,
+            self.z as f32 + self.depth as f32 / 2.0,
+        )
+    }
+    pub fn from_image(image: &Image3D) -> IBox3D {
+        IBox3D {
+            x: 0,
+            y: 0,
+            z: 0,
+            width: image.width as i64,
+            height: image.height as i64,
+            depth: image.depth as i64,
+        }
+    }
+
+    pub fn from_image_file(image: &Image3DFile) -> IBox3D {
+        IBox3D {
+            x: 0,
+            y: 0,
+            z: 0,
+            width: image.width as i64,
+            height: image.height as i64,
+            depth: image.depth as i64,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -130,7 +158,7 @@ pub fn stitch(
     prior_sigmas: (f32, f32, f32),
     merge_subgraphs: bool,
 ) -> Stitch3DResult {
-    let mut overlap_map = create_overlap_map(images, layout);
+    let mut overlap_map = create_overlap_map(images, layout, overlap_ratio);
     println!("Overlap map: {:?}", overlap_map);
     overlap_map
         .iter_mut()
@@ -161,10 +189,13 @@ pub fn stitch(
 
                     let start = std::time::Instant::now();
 
+                    let ref_box = IBox3D::from_image(&image_ref);
+                    let move_box = IBox3D::from_image(&image_move);
+
                     let (ref_roi, mov_roi) = get_intersection(
-                        &image_ref,
+                        &ref_box,
                         layout_ref,
-                        &image_move,
+                        &move_box,
                         layout_move,
                         overlap_ratio,
                     );
@@ -629,23 +660,14 @@ fn to_complex_with_padding(
 }
 
 fn get_intersection(
-    image_ref: &Image3D,
+    image_ref: &IBox3D,
     layout_ref: &IBox3D,
-    image_move: &Image3D,
+    image_move: &IBox3D,
     layout_move: &IBox3D,
     overlap_ratio: (f32, f32, f32),
 ) -> (IBox3D, IBox3D) {
-    let ref_center = (
-        layout_ref.x as f32 + layout_ref.width as f32 / 2.0,
-        layout_ref.y as f32 + layout_ref.height as f32 / 2.0,
-        layout_ref.z as f32 + layout_ref.depth as f32 / 2.0,
-    );
-
-    let move_center = (
-        layout_move.x as f32 + layout_move.width as f32 / 2.0,
-        layout_move.y as f32 + layout_move.height as f32 / 2.0,
-        layout_move.z as f32 + layout_move.depth as f32 / 2.0,
-    );
+    let ref_center = layout_ref.get_center();
+    let move_center = layout_move.get_center();
 
     let diff = (
         move_center.0 - ref_center.0,
@@ -1058,8 +1080,8 @@ fn solve_linear_system(a: &[f32], b: &[f32], size: usize) -> Vec<f32> {
     x
 }
 
-fn create_overlap_map(images: &[Image3DFile], layout: &[IBox3D]) -> Vec<Vec<usize>> {
-    (0..images.len())
+fn create_overlap_map(images: &[Image3DFile], layout: &[IBox3D], overlap_ratio: (f32, f32, f32)) -> Vec<Vec<usize>> {
+    let mut overlap_map: Vec<Vec<usize>> = (0..images.len())
         .map(|i| {
             let mut overlapping = vec![];
             let current = &layout[i];
@@ -1076,7 +1098,59 @@ fn create_overlap_map(images: &[Image3DFile], layout: &[IBox3D]) -> Vec<Vec<usiz
             }
             overlapping
         })
-        .collect()
+        .collect();
+
+
+    // Cull
+    overlap_map.iter_mut().enumerate().for_each(|(i, list)| {
+        let reference_layout = &layout[i];
+        let reference_box = IBox3D::from_image_file(&images[i]);
+        let mut list_with_dist = list.iter().map(|&x| {
+            let other_layout = &layout[x];
+            let other_box = IBox3D::from_image_file(&images[x]);
+            let (ref_roi, mov_roi) = get_intersection(&reference_box, &reference_layout, &other_box, &other_layout, overlap_ratio);
+            let overlap_pixel_count = (ref_roi.width * ref_roi.height * ref_roi.depth).max(mov_roi.width * mov_roi.height * mov_roi.depth);
+            return (x, overlap_pixel_count);
+        }).collect::<Vec<_>>();
+
+        // Sort by overlap amount, highest first
+        list_with_dist.sort_by(|a, b| b.1.cmp(&a.1));
+
+        // Remove occluded images
+        let reference_center = reference_layout.get_center();
+        let mut new_list: Vec<usize> = vec![];
+
+        for (i, _) in list_with_dist.iter() {
+            let current_center = layout[*i].get_center();
+            let mut occluded = false;
+            for j in new_list.iter() {
+                // Calculate angles from both current and to_test to reference center
+                // Then check if angles are within each other by 20 degrees
+                // if so, then the image is occluded, remove it
+                let other_center = &layout[*j].get_center();
+                let angle_current = (current_center.0 - reference_center.0, current_center.1 - reference_center.1, current_center.2 - reference_center.2);
+                let angle_other = (other_center.0 - reference_center.0, other_center.1 - reference_center.1, other_center.2 - reference_center.2);
+                let dot = angle_current.0 * angle_other.0 + angle_current.1 * angle_other.1 + angle_current.2 * angle_other.2;
+                let mag_current = (angle_current.0.powi(2) + angle_current.1.powi(2) + angle_current.2.powi(2)).sqrt();
+                let mag_other = (angle_other.0.powi(2) + angle_other.1.powi(2) + angle_other.2.powi(2)).sqrt();
+                let cos_theta = dot / (mag_current * mag_other);
+                let theta = cos_theta.acos();
+
+                if theta < 20.0f32.to_radians() {
+                    occluded = true;
+                    break;
+                }
+            }
+
+            if !occluded {
+                new_list.push(*i);
+            }
+        }
+
+        list.retain(|x| new_list.contains(x));
+    });
+
+    overlap_map
 }
 
 fn fft_3d<T: FftNum>(
