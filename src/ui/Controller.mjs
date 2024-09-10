@@ -300,6 +300,7 @@ export class Controller {
         this.paneCollection.addPane(pane);
 
         const viewer = new StitchVisualizer();
+        viewer.setFuseMode(config.fuse_mode);
 
         this.stitchVisualizer = viewer;
         
@@ -370,6 +371,7 @@ export class Controller {
             this.paneCollection.addPane(pane);
 
             const viewer = new StitchVisualizer();
+            viewer.setFuseMode(config.fuse_mode);
             pane.getElement().appendChild(viewer.getElement());
             this.addToRenderQueue(viewer);
 
