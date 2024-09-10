@@ -255,6 +255,9 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
             "linear" => {
                 config.fuse_mode = FuseMode::Linear;
             }
+            "overwrite-prioritize-center" => {
+                config.fuse_mode = FuseMode::OverwritePrioritizeCenter;
+            }
             _ => {
                 panic!("Invalid fuse mode");
             }
