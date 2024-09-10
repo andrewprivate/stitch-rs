@@ -1,3 +1,5 @@
+use std::iter::Fuse;
+
 use rayon::prelude::*;
 
 use crate::image::*;
@@ -11,6 +13,7 @@ pub enum FuseMode {
     Min,
     Max,
     Overwrite,
+    OverwritePrioritizeCenter,
 }
 
 pub fn get_linear_weight_3d(
@@ -59,7 +62,7 @@ pub fn fuse_2d(
     let mut new_image_weights: Vec<f32> = vec![];
     if mode == FuseMode::Average {
         new_image_counts = vec![0; (width * height) as usize];
-    } else if mode == FuseMode::Linear {
+    } else if mode == FuseMode::Linear || mode == FuseMode::OverwritePrioritizeCenter {
         new_image_weights = vec![0.0; (width * height) as usize];
     }
 
@@ -127,6 +130,18 @@ pub fn fuse_2d(
                         );
                         new_image[index] += val * weight;
                         new_image_weights[index] += weight;
+                    }
+                    FuseMode::OverwritePrioritizeCenter => {
+                        let weight = get_linear_weight_3d(
+                            (image.width, image.height, 1),
+                            (src_x, src_y, 0),
+                            1.5,
+                        );
+
+                        if weight > new_image_weights[index] {
+                            new_image[index] = val;
+                            new_image_weights[index] = weight;
+                        }
                     }
                 }
             }
@@ -328,8 +343,7 @@ pub fn fuse_3d(
 
                     for y in start_y..end_y {
                         for x in start_x..end_x {
-                            let index =
-                                (x + y * width as i64) as usize;
+                            let index = (x + y * width as i64) as usize;
                             chunk[index] += get_linear_weight_3d(
                                 (image.width, image.height, image.depth),
                                 (
@@ -344,7 +358,9 @@ pub fn fuse_3d(
                 }
             });
 
-            println!("Image weights calculated");
+        println!("Image weights calculated");
+    } else if FuseMode::OverwritePrioritizeCenter == mode {
+        new_image_weights = vec![0.0; (width * height * depth) as usize];
     }
 
     let default_value = match mode {
@@ -353,6 +369,7 @@ pub fn fuse_3d(
         FuseMode::Min => 255,
         FuseMode::Overwrite => 0,
         FuseMode::Linear => 0,
+        FuseMode::OverwritePrioritizeCenter => 0,
     };
     let mut new_image: Vec<u8> = vec![default_value; (width * height * depth) as usize];
     for i in 0..num_images {
@@ -366,103 +383,6 @@ pub fn fuse_3d(
 
         match mode {
             FuseMode::Average => {
-                new_image[start_z as usize * width * height..end_z as usize * width * height]
-                .par_chunks_mut(width * height)
-                .enumerate()
-                .for_each(|(z, chunk)| {
-                    let z = z as i64 + start_z;
-                    for y in start_y..end_y {
-                        for x in start_x..end_x {
-                            let index = (x + y * width as i64) as usize;
-                            let val = get_val(
-                                (
-                                    (x - offset_i.0) as usize,
-                                    (y - offset_i.1) as usize,
-                                    (z as i64 - offset_i.2) as usize,
-                                ),
-                                offset_f,
-                                &image,
-                            );
-                            let val = ((val - min) / (max - min) * 255.0).clamp(0.0, 255.0) as u8;
-                            let cindex = (x + y * width as i64 + z as i64 * width as i64 * height as i64) as usize;
-                            chunk[index] = chunk[index].saturating_add(val / new_image_counts[cindex]);
-                        }
-                    }
-                });
-            }
-            FuseMode::Max => {
-                new_image[start_z as usize * width * height..end_z as usize * width * height]
-                .par_chunks_mut(width * height)
-                .enumerate()
-                .for_each(|(z, chunk)| {
-                    let z = z as i64 + start_z;
-                    for y in start_y..end_y {
-                        for x in start_x..end_x {
-                            let index = (x + y * width as i64) as usize;
-                            let val = get_val(
-                                (
-                                    (x - offset_i.0) as usize,
-                                    (y - offset_i.1) as usize,
-                                    (z as i64 - offset_i.2) as usize,
-                                ),
-                                offset_f,
-                                &image,
-                            );
-                            let val = ((val - min) / (max - min) * 255.0).clamp(0.0, 255.0) as u8;
-                            chunk[index] = chunk[index].max(val);
-                        }
-                    }
-                });
-            }
-            FuseMode::Min => {
-                new_image[start_z as usize * width * height..end_z as usize * width * height]
-                .par_chunks_mut(width * height)
-                .enumerate()
-                .for_each(|(z, chunk)| {
-                    let z = z as i64 + start_z;
-                    for y in start_y..end_y {
-                        for x in start_x..end_x {
-                            let index = (x + y * width as i64) as usize;
-                            let val = get_val(
-                                (
-                                    (x - offset_i.0) as usize,
-                                    (y - offset_i.1) as usize,
-                                    (z as i64 - offset_i.2) as usize,
-                                ),
-                                offset_f,
-                                &image,
-                            );
-                            let val = ((val - min) / (max - min) * 255.0).clamp(0.0, 255.0) as u8;
-                            chunk[index] = chunk[index].min(val);
-                        }
-                    }
-                });
-            }
-            FuseMode::Overwrite => {
-                new_image[start_z as usize * width * height..end_z as usize * width * height]
-                .par_chunks_mut(width * height)
-                .enumerate()
-                .for_each(|(z, chunk)| {
-                    let z = z as i64 + start_z;
-                    for y in start_y..end_y {
-                        for x in start_x..end_x {
-                            let index = (x + y * width as i64) as usize;
-                            let val = get_val(
-                                (
-                                    (x - offset_i.0) as usize,
-                                    (y - offset_i.1) as usize,
-                                    (z as i64 - offset_i.2) as usize,
-                                ),
-                                offset_f,
-                                &image,
-                            );
-                            let val = ((val - min) / (max - min) * 255.0).clamp(0.0, 255.0) as u8;
-                            chunk[index] = val;
-                        }
-                    }
-                });
-            }
-            FuseMode::Linear => {
                 new_image[start_z as usize * width * height..end_z as usize * width * height]
                     .par_chunks_mut(width * height)
                     .enumerate()
@@ -480,8 +400,114 @@ pub fn fuse_3d(
                                     offset_f,
                                     &image,
                                 );
-                                let val = ((val - min) / (max - min) * 255.0).clamp(0.0, 255.0) as u8;
-                                let cindex = (x + y * width as i64 + z as i64 * width as i64 * height as i64) as usize;
+                                let val =
+                                    ((val - min) / (max - min) * 255.0).clamp(0.0, 255.0) as u8;
+                                let cindex = (x
+                                    + y * width as i64
+                                    + z as i64 * width as i64 * height as i64)
+                                    as usize;
+                                chunk[index] =
+                                    chunk[index].saturating_add(val / new_image_counts[cindex]);
+                            }
+                        }
+                    });
+            }
+            FuseMode::Max => {
+                new_image[start_z as usize * width * height..end_z as usize * width * height]
+                    .par_chunks_mut(width * height)
+                    .enumerate()
+                    .for_each(|(z, chunk)| {
+                        let z = z as i64 + start_z;
+                        for y in start_y..end_y {
+                            for x in start_x..end_x {
+                                let index = (x + y * width as i64) as usize;
+                                let val = get_val(
+                                    (
+                                        (x - offset_i.0) as usize,
+                                        (y - offset_i.1) as usize,
+                                        (z as i64 - offset_i.2) as usize,
+                                    ),
+                                    offset_f,
+                                    &image,
+                                );
+                                let val =
+                                    ((val - min) / (max - min) * 255.0).clamp(0.0, 255.0) as u8;
+                                chunk[index] = chunk[index].max(val);
+                            }
+                        }
+                    });
+            }
+            FuseMode::Min => {
+                new_image[start_z as usize * width * height..end_z as usize * width * height]
+                    .par_chunks_mut(width * height)
+                    .enumerate()
+                    .for_each(|(z, chunk)| {
+                        let z = z as i64 + start_z;
+                        for y in start_y..end_y {
+                            for x in start_x..end_x {
+                                let index = (x + y * width as i64) as usize;
+                                let val = get_val(
+                                    (
+                                        (x - offset_i.0) as usize,
+                                        (y - offset_i.1) as usize,
+                                        (z as i64 - offset_i.2) as usize,
+                                    ),
+                                    offset_f,
+                                    &image,
+                                );
+                                let val =
+                                    ((val - min) / (max - min) * 255.0).clamp(0.0, 255.0) as u8;
+                                chunk[index] = chunk[index].min(val);
+                            }
+                        }
+                    });
+            }
+            FuseMode::Overwrite => {
+                new_image[start_z as usize * width * height..end_z as usize * width * height]
+                    .par_chunks_mut(width * height)
+                    .enumerate()
+                    .for_each(|(z, chunk)| {
+                        let z = z as i64 + start_z;
+                        for y in start_y..end_y {
+                            for x in start_x..end_x {
+                                let index = (x + y * width as i64) as usize;
+                                let val = get_val(
+                                    (
+                                        (x - offset_i.0) as usize,
+                                        (y - offset_i.1) as usize,
+                                        (z as i64 - offset_i.2) as usize,
+                                    ),
+                                    offset_f,
+                                    &image,
+                                );
+                                let val =
+                                    ((val - min) / (max - min) * 255.0).clamp(0.0, 255.0) as u8;
+                                chunk[index] = val;
+                            }
+                        }
+                    });
+            }
+            FuseMode::Linear => {
+                new_image[start_z as usize * width * height..end_z as usize * width * height]
+                    .par_chunks_mut(width * height)
+                    .zip(new_image_weights[start_z as usize * width * height..end_z as usize * width * height].par_chunks(width * height))
+                    .enumerate()
+                    .for_each(|(z, (chunk, weight_chunk))| {
+                        let z = z as i64 + start_z;
+                        for y in start_y..end_y {
+                            for x in start_x..end_x {
+                                let index = (x + y * width as i64) as usize;
+                                let val = get_val(
+                                    (
+                                        (x - offset_i.0) as usize,
+                                        (y - offset_i.1) as usize,
+                                        (z as i64 - offset_i.2) as usize,
+                                    ),
+                                    offset_f,
+                                    &image,
+                                );
+                                let val =
+                                    ((val - min) / (max - min) * 255.0).clamp(0.0, 255.0) as u8;
                                 chunk[index] = chunk[index].saturating_add(
                                     (val as f32
                                         * get_linear_weight_3d(
@@ -493,12 +519,50 @@ pub fn fuse_3d(
                                             ),
                                             alpha,
                                         )
-                                        / new_image_weights[cindex])
-                                        as u8
-                                    );
+                                        / weight_chunk[index])
+                                        as u8,
+                                );
                             }
                         }
-                    });           
+                    });
+            }
+            FuseMode::OverwritePrioritizeCenter => {
+                new_image[start_z as usize * width * height..end_z as usize * width * height]
+                    .par_chunks_mut(width * height)
+                    .zip(new_image_weights[start_z as usize * width * height..end_z as usize * width * height].par_chunks_mut(width * height))
+                    .enumerate()
+                    .for_each(|(z, (chunk, weight_chunk))| {
+                        let z = z as i64 + start_z;
+                        for y in start_y..end_y {
+                            for x in start_x..end_x {
+                                let index = (x + y * width as i64) as usize;
+                                let val = get_val(
+                                    (
+                                        (x - offset_i.0) as usize,
+                                        (y - offset_i.1) as usize,
+                                        (z as i64 - offset_i.2) as usize,
+                                    ),
+                                    offset_f,
+                                    &image,
+                                );
+                                let val =
+                                    ((val - min) / (max - min) * 255.0).clamp(0.0, 255.0) as u8;
+                                let weight = get_linear_weight_3d(
+                                    (image.width, image.height, image.depth),
+                                    (
+                                        (x - offset_i.0) as usize,
+                                        (y - offset_i.1) as usize,
+                                        (z as i64 - offset_i.2) as usize,
+                                    ),
+                                    alpha,
+                                );
+                                if weight > weight_chunk[index] {
+                                    chunk[index] = val;
+                                    weight_chunk[index] = weight;
+                                }
+                            }
+                        }
+                    });
             }
         }
 

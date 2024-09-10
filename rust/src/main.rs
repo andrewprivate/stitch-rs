@@ -65,6 +65,9 @@ fn main() {
                     "linear" => {
                         config.fuse_mode = FuseMode::Linear;
                     }
+                    "overwrite-prioritize-center" => {
+                        config.fuse_mode = FuseMode::OverwritePrioritizeCenter;
+                    }
                     _ => {
                         println!("Invalid fuse mode: {}", args[i]);
                         return;

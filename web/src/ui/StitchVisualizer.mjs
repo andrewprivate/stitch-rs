@@ -14,6 +14,7 @@ export class StitchVisualizer {
         this.offsets = [];
         this.interactiveTiles = [];
         this.offsetCache = {};
+        this.fuseMode = 'linear'
         this.centerOffset = { x: 0, y: 0 };
         this.sliceDirection = SliceDirection.Z;
         this.currentSliceFromMiddle = 0;
@@ -137,7 +138,7 @@ export class StitchVisualizer {
                 height: sizeY
             }
 
-            await worker.emit('render', index, canvasBounds, imageBoundsList, sliceDatas);
+            await worker.emit('render', index, canvasBounds, imageBoundsList, sliceDatas, this.fuseMode);
 
             if (!this.rerenderFuse) {
                 canvas.style.opacity = 1;
@@ -149,6 +150,11 @@ export class StitchVisualizer {
         await Promise.all(promises);
     }
 
+    setFuseMode(mode) {
+        this.fuseMode = mode;
+        this.requestFusedRender();
+    }
+    
     setupUI() {
         this.ui.container = document.createElement('div');
         this.ui.container.classList.add('stitch-visualizer');
@@ -340,17 +346,17 @@ export class StitchVisualizer {
         const label = document.createElement('div');
         label.classList.add('tile-label');
 
-        const check = () =>{
-               // Check if label fits inside the container, if not then move it above the tile
-               const tileWidth = tile.offsetWidth;
-               const tileHeight = tile.offsetHeight;
-               const labelWidth = label.offsetWidth;
-               const labelHeight = label.offsetHeight;
-               if (labelWidth > tileWidth || labelHeight > tileHeight) {
-                   label.style.transform = 'translate(0%, -100%)';
-               } else {
-                   label.style.transform = '';
-               }
+        const check = () => {
+            // Check if label fits inside the container, if not then move it above the tile
+            const tileWidth = tile.offsetWidth;
+            const tileHeight = tile.offsetHeight;
+            const labelWidth = label.offsetWidth;
+            const labelHeight = label.offsetHeight;
+            if (labelWidth > tileWidth || labelHeight > tileHeight) {
+                label.style.transform = 'translate(0%, -100%)';
+            } else {
+                label.style.transform = '';
+            }
         }
 
         tile.addEventListener('mouseenter', () => {
@@ -385,7 +391,7 @@ export class StitchVisualizer {
         });
 
         // When double clicked, enter edit mode which can be used to adjust tile position
-        
+
         tile.addEventListener('dblclick', (e) => {
             if (this.isEditing) {
                 this.endEditMode();
@@ -453,7 +459,7 @@ export class StitchVisualizer {
             document.addEventListener('mousemove', moveListener);
             document.addEventListener('mouseup', mouseUpListener);
         }
-        
+
         this.mouseDownListener = mouseDownListener;
         this.editingTile = this.interactiveTiles[i];
         this.editingTile.classList.add('editing');
@@ -536,7 +542,7 @@ export class StitchVisualizer {
         if (lastLen !== this.images.length) {
             this.centerAndScale();
         }
-        
+
         const sliceBounds = this.getSliceBounds();
         this.setSliceIndex(Utils.clamp(this.currentSliceFromMiddle, sliceBounds.min, sliceBounds.max), true);
         this.updateSliceSlider();
@@ -658,20 +664,30 @@ export class StitchVisualizer {
         const bounds = this.getFrameBounds();
         const minZ = bounds.minZ;
         const results = [];
+
+        let deferStash = this.images.length < 5;
+
         for (let i = 0; i < this.viewers.length; i++) {
             const viewer = this.viewers[i];
-            let result = await viewer.render()
+            let result = await viewer.render(deferStash)
             results.push(result);
         }
 
-        // // Schedule restash
-        // this.images.forEach((image, i) => {
-        //     if (!image.stashScheduled()) {
-        //         image.scheduleStash(10000);
-        //     }
-        // });
+        if (deferStash) {
+            // Schedule restash
+            this.images.forEach((image, i) => {
+                if (!image.stashScheduled()) {
+                    image.scheduleStash(10000);
+                }
+            });
+        }
 
-        if (results.some(result => result === true)) {
+        const hasReRendered = results.some(result => result === true);
+        if (hasReRendered) {
+            this.reRendering = true;
+        }
+
+        if (!hasReRendered && this.reRendering) {
             this.ui.sliceIndexDisplay.textContent = `${this.sliceDirection}=${this.currentSliceFromMiddle}/${bounds.depth}`;
 
             this.viewers.forEach((viewer, i) => {
@@ -683,10 +699,11 @@ export class StitchVisualizer {
                     viewer.canvas.style.display = '';
                 }
             });
+            this.reRendering = false;
         }
 
 
-        if (this.rerenderFuse) {
+        if (this.rerenderFuse && !this.reRendering) {
             this.rerenderFuse = false;
             await this.renderFused();
         }

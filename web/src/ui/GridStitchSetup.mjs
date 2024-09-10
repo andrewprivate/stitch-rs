@@ -269,6 +269,33 @@ export class GridStitchSetup {
 
         // this.ui.step2.appendChild(this.ui.generateGridButton);
 
+        // Add select for fuse mode
+        const fuseModes = [
+            'linear',
+            'average',
+            'max',
+            'min',
+            'overwrite',
+            'overwrite-prioritize-center'
+        ];
+
+        this.ui.fuseMode = document.createElement('select');
+        this.ui.fuseMode.className = 'fuse-mode';
+        this.ui.step2.appendChild(this.ui.fuseMode);
+
+        fuseModes.forEach(mode => {
+            const option = document.createElement('option');
+            option.value = mode;
+            option.innerText = mode;
+            this.ui.fuseMode.appendChild(option);
+        });
+
+        this.ui.fuseMode.value = 'linear';
+
+        this.ui.fuseMode.addEventListener('change', () => {
+            this.ui.stitchPreview.setFuseMode(this.ui.fuseMode.value);
+        });
+
         this.ui.container.appendChild(this.ui.step2);
 
         // Add grid preview
