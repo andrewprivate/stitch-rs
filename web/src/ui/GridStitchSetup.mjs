@@ -515,7 +515,8 @@ export class GridStitchSetup {
     generateStitchConfig() {
         const obj = {
             version: "1.0.0",
-            overlap_ratio: 0
+            fuse_mode: this.ui.fuseMode.value,
+            overlap_ratio: 0,
         }
 
         const tiles = this.gridTiles;
