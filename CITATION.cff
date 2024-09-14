@@ -1,0 +1,24 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: Stitch-rs
+message: Rust based image stitching with restricted tile offsets
+type: software
+authors:
+  - given-names: Andrew
+    email: andrews3596@gmail.com
+repository-code: 'https://github.com/andrewprivate/stitch-rs'
+abstract: >-
+  Stitches images using a modified version of the algorithm
+  described in "Globally optimal stitching of tiled 3D
+  microscopic image acquisitions."
+
+
+  The algorithm is modified to include a system to
+  prioritize tile offset values within a distribution values
+  to improve robustness for images containing periodic, or
+  minimal features.
+keywords:
+  - stitching
+  - image processing
