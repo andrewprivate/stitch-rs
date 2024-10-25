@@ -145,8 +145,10 @@ pub fn stitch(
                 .map(|&j| {
                     let layout_ref = &layout[i];
                     let layout_move = &layout[j];
-                    let image_ref = &images[i];
                     let image_move = &images[j];
+                    let image_ref = &images[i];
+
+                    let start = std::time::Instant::now();
                     
                     let ref_box = IBox2D::from_image(image_ref);
                     let mov_box = IBox2D::from_image(image_move);
@@ -159,15 +161,28 @@ pub fn stitch(
                         overlap_ratio,
                     );
 
-                    let ref_img = extract_image_with_roi(image_ref, &ref_roi);
-                    let mov_img = extract_image_with_roi(image_move, &mov_roi);
+                    let ref_img = extract_image_with_roi(&image_ref, &ref_roi);
+                    let mov_img = extract_image_with_roi(&image_move, &mov_roi);
 
                     let max_size = (
                         ref_roi.width.max(mov_roi.width) as usize,
                         ref_roi.height.max(mov_roi.height) as usize,
                     );
 
+                    if max_size.0 * max_size.1 == 0 {
+                        println!("No overlap");
+                        return Pair2D {
+                            i,
+                            j,
+                            offset: (0, 0),
+                            weight: 0.0,
+                            valid: false,
+                        };
+                    }
+
                     let mut ref_fft = to_complex_with_padding(&ref_img, max_size.0, max_size.1);
+                    let start = std::time::Instant::now();
+
                     let mut mov_fft = to_complex_with_padding(&mov_img, max_size.0, max_size.1);
 
                     fft_2d(
@@ -258,22 +273,6 @@ pub fn stitch(
                         .flat_map(|peak| disambiguate_2d(max_size.0, max_size.1, *peak))
                         .collect::<Vec<_>>();
 
-                    // Multiply cc by prior
-                    if use_prior {
-                        peaks.iter_mut().for_each(|peak| {
-                            let x = peak.0 as i32;
-                            let y = peak.1 as i32;
-                            peak.2 *= guassian_2d(
-                                x as f32,
-                                y as f32,
-                                0.0,
-                                0.0,
-                                prior_sigmas.0,
-                                prior_sigmas.1,
-                            );
-                        });
-                    }
-
                     // Filter peaks
                     let ratio = 0.75;
                     let max_shift = (
@@ -305,35 +304,65 @@ pub fn stitch(
                         peak.2 = res.0;
                     });
 
-                    // Filter peaks
-                    peaks.retain(|peak| peak.2 > correlation_threshold);
+                    // Multiply cc by prior
+                    if use_prior {
+                        peaks.iter_mut().for_each(|peak| {
+                            let x = peak.0 as i32;
+                            let y = peak.1 as i32;
+                            peak.2 *= guassian_2d(
+                                x as f32,
+                                y as f32,
+                                0.0,
+                                0.0,
+                                prior_sigmas.0,
+                                prior_sigmas.1,
+                            );
+                        });
+                    }
 
                     // Sort by highest R
                     peaks.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
 
                     // Adjust peaks by roi
+                    // find roi center pos
+                    let ref_roi_center = (
+                        ref_roi.x + ref_roi.width / 2,
+                        ref_roi.y + ref_roi.height / 2,
+                    );
+
+                    let mov_roi_center = (
+                        mov_roi.x + mov_roi.width / 2,
+                        mov_roi.y + mov_roi.height / 2,
+                    );
+
+                    let diff = (
+                        mov_roi_center.0 - ref_roi_center.0,
+                        mov_roi_center.1 - ref_roi_center.1,
+                    );
                     peaks.iter_mut().for_each(|peak| {
-                        peak.0 += ref_roi.x - mov_roi.x;
-                        peak.1 += ref_roi.y - mov_roi.y;
+                        peak.0 += -diff.0;
+                        peak.1 += -diff.1;
                     });
 
                     let mut done2 = done.lock().unwrap();
                     *done2 += 1;
+                    let first_peak = peaks.first().unwrap_or(&(0, 0, 0.0));
+                    
                     println!(
                         "Progress {}/{}: {} - {} {:?}",
                         *done2,
                         todo,
                         i,
                         j,
-                        peaks.first().unwrap_or(&(0, 0, 0.0))
+                        first_peak
                     );
 
                     Pair2D {
                         i,
                         j,
-                        offset: peaks.first().map(|x| (x.0, x.1)).unwrap_or((0, 0)),
-                        weight: peaks.first().map(|x| x.2).unwrap_or(0.0),
-                        valid: peaks.len() > 0,
+                        offset: (first_peak.0, first_peak.1),
+                        weight: first_peak.2,
+                        valid: peaks.len() > 0 && first_peak.2 > correlation_threshold,
                     }
                 })
                 .collect::<Vec<_>>()
@@ -507,7 +536,7 @@ fn check_offsets(
         let dst = (diff.0.powi(2) + diff.1.powi(2)).sqrt();
         mean_dst += dst;
 
-        let error = dst * dst * weight;
+        let error = dst * dst;
         mean_error += error;
 
         if error > max_error {
@@ -543,7 +572,9 @@ fn to_complex_with_padding(image: &Image2D, width: usize, height: usize) -> Vec<
             let src_x = x - start_x;
             let src_y = y - start_y;
             let val = image.get(src_x, src_y);
-            data[x + y * width] = Complex::new(val, 0.0);
+            if val.is_finite() {
+                data[x + y * width].re = val;
+            }
         }
     }
 
@@ -789,11 +820,11 @@ fn pairs_to_graph(pairs: &[Pair2D], num_images: usize) -> StitchGraph2D {
             let ij_index = i * num_images + j;
             let ji_index = j * num_images + i;
 
-            let offset = &pair.offset;
-            shift_x[ij_index] = offset.0 as f32;
-            shift_y[ij_index] = offset.1 as f32;
-            shift_x[ji_index] = -offset.0 as f32;
-            shift_y[ji_index] = -offset.1 as f32;
+            let peak = &pair.offset;
+            shift_x[ij_index] = peak.0 as f32;
+            shift_y[ij_index] = peak.1 as f32;
+            shift_x[ji_index] = -peak.0 as f32;
+            shift_y[ji_index] = -peak.1 as f32;
 
             adjacency_matrix[ij_index] = 1.0;
             adjacency_matrix[ji_index] = 1.0;
@@ -1129,6 +1160,10 @@ fn test_cross_2d(
         for x in start_x..end_x {
             let val1 = img1.data[(y - offset_img1_y) * w1 + (x - offset_img1_x)] as f64;
             let val2 = img2.data[(y - offset_img2_y) * w2 + (x - offset_img2_x)] as f64;
+            if !val1.is_finite() || !val2.is_finite() {
+                continue;
+            }
+
             avg1 += val1;
             avg2 += val2;
             count += 1;
@@ -1151,6 +1186,10 @@ fn test_cross_2d(
         for x in start_x..end_x {
             let val1 = img1.data[(y - offset_img1_y) * w1 + (x - offset_img1_x)] as f64;
             let val2 = img2.data[(y - offset_img2_y) * w2 + (x - offset_img2_x)] as f64;
+
+            if !val1.is_finite() || !val2.is_finite() {
+                continue;
+            }
 
             let pixel_ssq = (val1 - val2).powi(2);
             ssq += pixel_ssq;

@@ -433,7 +433,7 @@ export class StitchVisualizer {
             const newx = Math.round(currentPos.x + offsetX / this.scale);
             const newy = Math.round(currentPos.y + offsetY / this.scale);
 
-            this.setOffsetForImage(i, { x: newx, y: newy });
+            this.setOffsetForImage(i, { x: newx, y: newy }, window.repeat || 1);
 
             this.updateOffsets();
             this.requestFusedRender();
@@ -585,7 +585,8 @@ export class StitchVisualizer {
         return this.cachedBounds;
     }
 
-    setOffsetForImage(imageIndex, newoff) {
+    setOffsetForImage(imageIndex, newoff, repeat = 1) {
+        let original_offset = { ...this.offsets[imageIndex] };
         const direction = this.sliceDirection;
         const offsets = this.offsets[imageIndex];
         switch (direction) {
@@ -604,6 +605,15 @@ export class StitchVisualizer {
                 if (newoff.y !== undefined) offsets.y = newoff.y;
                 if (newoff.z !== undefined) offsets.z = newoff.z;
                 break;
+        }
+
+        let diffs = { x: offsets.x - original_offset.x, y: offsets.y - original_offset.y, z: offsets.z - original_offset.z };
+
+        for (let i = 1; i < repeat; i++) {
+            const next_offset = this.offsets[imageIndex + i];
+            next_offset.x += diffs.x;
+            next_offset.y += diffs.y;
+            next_offset.z += diffs.z;
         }
     }
 

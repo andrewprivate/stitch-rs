@@ -417,33 +417,52 @@ pub fn stitch(
                     peaks.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap());
 
                     // Adjust peaks by roi
+                    // find roi center pos
+                    let ref_roi_center = (
+                        ref_roi.x + ref_roi.width / 2,
+                        ref_roi.y + ref_roi.height / 2,
+                        ref_roi.z + ref_roi.depth / 2,
+                    );
+
+                    let mov_roi_center = (
+                        mov_roi.x + mov_roi.width / 2,
+                        mov_roi.y + mov_roi.height / 2,
+                        mov_roi.z + mov_roi.depth / 2,
+                    );
+
+                    let diff = (
+                        mov_roi_center.0 - ref_roi_center.0,
+                        mov_roi_center.1 - ref_roi_center.1,
+                        mov_roi_center.2 - ref_roi_center.2,
+                    );
                     peaks.iter_mut().for_each(|peak| {
-                        peak.0 += ref_roi.x - mov_roi.x;
-                        peak.1 += ref_roi.y - mov_roi.y;
-                        peak.2 += ref_roi.z - mov_roi.z;
+                        peak.0 += -diff.0;
+                        peak.1 += -diff.1;
+                        peak.2 += -diff.2;
                     });
 
                     println!("Peak finding took {:?}", start.elapsed());
 
                     let mut done2 = done.lock().unwrap();
                     *done2 += 1;
+                    let first_peak = peaks.first().unwrap_or(&(0, 0, 0, 0.0));
+
                     println!(
                         "Progress {}/{}: {} - {} {:?}",
                         *done2,
                         todo,
                         i,
                         j,
-                        peaks.first().unwrap_or(&(0, 0, 0, 0.0))
+                        first_peak
                     );
 
-                    let first_peak = peaks.first().unwrap_or(&(0, 0, 0, 0.0));
-
+                   
                     Pair3D {
                         i,
                         j,
                         offset: (first_peak.0, first_peak.1, first_peak.2),
                         weight: first_peak.3,
-                        valid: peaks.len() > 0,
+                        valid: peaks.len() > 0 && first_peak.3 > correlation_threshold,
                     }
                 })
                 .collect::<Vec<_>>()
