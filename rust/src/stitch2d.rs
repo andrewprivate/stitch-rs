@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Mutex};
+use std::sync::Mutex;
 
 use rayon::prelude::*;
 use rustfft::{num_complex::Complex, num_traits::Zero, FftNum, FftPlanner};
@@ -147,8 +147,6 @@ pub fn stitch(
                     let layout_move = &layout[j];
                     let image_move = &images[j];
                     let image_ref = &images[i];
-
-                    let start = std::time::Instant::now();
                     
                     let ref_box = IBox2D::from_image(image_ref);
                     let mov_box = IBox2D::from_image(image_move);
@@ -181,8 +179,6 @@ pub fn stitch(
                     }
 
                     let mut ref_fft = to_complex_with_padding(&ref_img, max_size.0, max_size.1);
-                    let start = std::time::Instant::now();
-
                     let mut mov_fft = to_complex_with_padding(&mov_img, max_size.0, max_size.1);
 
                     fft_2d(
@@ -514,7 +510,7 @@ fn check_offsets(
         let i = pair.i;
         let j = pair.j;
         let peak = pair.offset;
-        let weight = pair.weight;
+        let _weight = pair.weight;
 
         let sub_i = subgraph.iter().position(|&x| x == i);
         let sub_j = subgraph.iter().position(|&x| x == j);

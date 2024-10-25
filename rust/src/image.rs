@@ -1,9 +1,8 @@
 use core::f32;
-use std::{io::Cursor, path::{Path, PathBuf}, u16};
+use std::{path::{Path, PathBuf}, u16};
 use image::ImageReader;
 use dicom::{core::{DataElement, PrimitiveValue, VR}, dictionary_std::tags, pixeldata::PixelDecoder};
 use rustfft::num_traits::Pow;
-use serde_json::de;
 use tiff::decoder::DecodingResult;
 
 /**
@@ -26,7 +25,7 @@ pub struct Image3D8 {
 }
 
 
-pub struct Image3D16 {
+pub struct _Image3D16 {
     pub width: usize,
     pub height: usize,
     pub depth: usize,
@@ -582,9 +581,9 @@ pub fn read_tiff_headers(file_path: &Path) -> Image3DFile {
     loop {
         let image: DecodingResult = decoder.read_image().unwrap();
 
-        if let DecodingResult::U8(data) = image {
+        if let DecodingResult::U8(_data) = image {
             max = max.max(255.0);
-        } else if let DecodingResult::U16(data) = image {
+        } else if let DecodingResult::U16(_data) = image {
             max = max.max(u16::MAX as f32);
         } else if let DecodingResult::F32(data) = image {
             data.iter().for_each(|x| {
@@ -618,7 +617,6 @@ pub fn read_image_2d(file_path: &Path) -> Image2D {
     let img = ImageReader::open(file_path).unwrap().decode().unwrap();
     let width = img.width();
     let height = img.height();
-    let size = width * height;
     let buffer = img.into_luma16().into_vec();
     let min = 0.0;
     let max = u16::MAX as f32;

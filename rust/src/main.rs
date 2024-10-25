@@ -1,7 +1,6 @@
 use fuse::{fuse_2d, fuse_3d, FuseMode};
 use image::{
-    read_dcm, read_dcm_headers, read_image_2d, read_tiff, read_tiff_headers, save_as_dcm,
-    save_as_dcm_8, save_image_2d, Image2D, Image3D, Image3D8, Image3DFile,
+    read_dcm_headers, read_image_2d, read_tiff_headers, save_as_dcm_8, save_image_2d,
 };
 use rayon::prelude::*;
 use serde_json::*;
@@ -292,7 +291,7 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
 
     // Check prior sigmas
     if !json.get("prior_sigma").is_none() {
-        if (json["prior_sigma"].is_array()) {
+        if json["prior_sigma"].is_array() {
             let sigmas = json["prior_sigma"].as_array().unwrap();
             if sigmas.len() == 2 {
                 config.prior_sigmas.0 = sigmas[0].as_f64().unwrap() as f32;

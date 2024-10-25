@@ -1,10 +1,10 @@
 use rayon::prelude::*;
 use rustfft::{num_complex::Complex, num_traits::Zero, FftNum, FftPlanner};
 use serde::{Deserialize, Serialize};
-use std::{path::Path, sync::Mutex};
+use std::sync::Mutex;
 use transpose::transpose;
 
-use crate::image::{save_as_dcm, Image3D, Image3DFile};
+use crate::image::{Image3D, Image3DFile};
 
 #[derive(Debug)]
 pub struct IBox3D {
@@ -610,7 +610,7 @@ fn check_offsets(
         let i = pair.i;
         let j = pair.j;
         let peak = pair.offset;
-        let weight = pair.weight;
+        let _weight = pair.weight;
 
         let sub_i = subgraph.iter().position(|&x| x == i);
         let sub_j = subgraph.iter().position(|&x| x == j);
@@ -1184,7 +1184,7 @@ fn create_overlap_map(images: &[Image3DFile], layout: &[IBox3D], overlap_ratio: 
     overlap_map
 }
 
-fn fft_3d<T: FftNum>(
+fn _fft_3d<T: FftNum>(
     width: usize,
     height: usize,
     num_frames: usize,

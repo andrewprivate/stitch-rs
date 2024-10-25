@@ -1,5 +1,3 @@
-use std::iter::Fuse;
-
 use rayon::prelude::*;
 
 use crate::image::*;
@@ -195,7 +193,7 @@ pub fn calc_iter_bounds(
     );
 
     let offset_i = (offset_i.0 as i64, offset_i.1 as i64, offset_i.2 as i64);
-    let offset_fi = (1.0 - offset_f.0, 1.0 - offset_f.1, 1.0 - offset_f.2);
+    // let offset_fi = (1.0 - offset_f.0, 1.0 - offset_f.1, 1.0 - offset_f.2);
 
     let start_x = offset_i.0.max(0);
     let start_y = offset_i.1.max(0);
@@ -303,7 +301,7 @@ pub fn fuse_3d(
 
         for i in 0..num_images {
             let image = &images[subgraph_indexes[i]];
-            let (start_x, start_y, start_z, end_x, end_y, end_z, offset_i, offset_f) =
+            let (start_x, start_y, start_z, end_x, end_y, end_z, _offset_i, _offset_f) =
                 calc_iter_bounds(
                     offsets[i],
                     (image.width, image.height, image.depth),
@@ -330,7 +328,7 @@ pub fn fuse_3d(
             .for_each(|(z, chunk)| {
                 for i in 0..num_images {
                     let image = &images[subgraph_indexes[i]];
-                    let (start_x, start_y, start_z, end_x, end_y, end_z, offset_i, offset_f) =
+                    let (start_x, start_y, start_z, end_x, end_y, end_z, offset_i, _offset_f) =
                         calc_iter_bounds(
                             offsets[i],
                             (image.width, image.height, image.depth),
