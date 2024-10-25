@@ -26,7 +26,7 @@ export class StitchVisualizer {
     getCurrentSliceForImage(imageIndex) {
         const bounds = this.getFrameBounds();
         const offset = this.getOffsetForImage(imageIndex);
-        return this.currentSliceFromMiddle + Math.floor(bounds.depth / 2) - bounds.minZ - offset.z
+        return this.currentSliceFromMiddle + (Math.floor(bounds.depth / 2) + bounds.minZ)- offset.z;
     }
 
     getSliceBounds() {
@@ -746,8 +746,9 @@ export class StitchVisualizer {
 
     updateSliceSlider() {
         const bounds = this.getSliceBounds();
-        this.ui.sliceSlider.min = bounds.min;
-        this.ui.sliceSlider.max = bounds.max;
+        let half = Math.floor(bounds.max - bounds.min) / 2;
+        this.ui.sliceSlider.min = -half;
+        this.ui.sliceSlider.max = bounds.max - bounds.min - half;
         this.ui.sliceSlider.value = this.currentSliceFromMiddle;
     }
 
