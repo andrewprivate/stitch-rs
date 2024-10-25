@@ -1,4 +1,3 @@
-use dicom::core::chrono::offset;
 use rayon::prelude::*;
 use rustfft::{num_complex::Complex, num_traits::Zero, FftNum, FftPlanner};
 use serde::{Deserialize, Serialize};
@@ -210,6 +209,18 @@ pub fn stitch(
                         ref_roi.height.max(mov_roi.height) as usize,
                         ref_roi.depth.max(mov_roi.depth) as usize,
                     );
+
+                    if max_size.0 * max_size.1 * max_size.2 == 0 {
+                        println!("No overlap");
+                        return Pair3D {
+                            i,
+                            j,
+                            offset: (0, 0, 0),
+                            weight: 0.0,
+                            valid: false,
+                        };
+                    }
+
                     println!("Intersection took {:?}", start.elapsed());
 
                     // if i == 0 && j == 5 {
@@ -402,9 +413,6 @@ pub fn stitch(
                         });
                     }
 
-                    // Filter peaks
-                    peaks.retain(|peak| peak.3 > correlation_threshold);
-
                     // Sort by highest R
                     peaks.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap());
 
@@ -428,11 +436,13 @@ pub fn stitch(
                         peaks.first().unwrap_or(&(0, 0, 0, 0.0))
                     );
 
+                    let first_peak = peaks.first().unwrap_or(&(0, 0, 0, 0.0));
+
                     Pair3D {
                         i,
                         j,
-                        offset: peaks.first().map(|x| (x.0, x.1, x.2)).unwrap_or((0, 0, 0)),
-                        weight: peaks.first().map(|x| x.3).unwrap_or(0.0),
+                        offset: (first_peak.0, first_peak.1, first_peak.2),
+                        weight: first_peak.3,
                         valid: peaks.len() > 0,
                     }
                 })
@@ -651,7 +661,9 @@ fn to_complex_with_padding(
             for x in start_x..end_x {
                 let src_x = x - start_x;
                 let val = image.get(src_x, src_y, src_z);
-                data[x + y * width + z * width * height].re = val;
+                if val.is_finite() {
+                    data[x + y * width + z * width * height].re = val;
+                }
             }
         }
     }
@@ -1448,17 +1460,18 @@ fn test_cross_3d(
         for y in start_y..end_y {
             let start_x1 = plane1 + (y - offset_img1_y) * w1;
             let start_x2 = plane2 + (y - offset_img2_y) * w2;
-            let w = end_x - start_x;
-            let slice1 = &img1.data[start_x1..start_x1 + w];
-            let slice2 = &img2.data[start_x2..start_x2 + w];
+            for x in start_x..end_x {
+                let val1 = img1.data[start_x1 + x - offset_img1_x];
+                let val2 = img2.data[start_x2 + x - offset_img2_x];
+                if !val1.is_finite() || !val2.is_finite() {
+                    continue;
+                }
 
-            let sum1 = slice1.iter().sum::<f32>();
-            let sum2 = slice2.iter().sum::<f32>();
+                avg1 += val1 as f64;
+                avg2 += val2 as f64;
 
-            avg1 += sum1 as f64;
-            avg2 += sum2 as f64;
-
-            count += w as i64;
+                count += 1;
+            }
         }
     }
 
@@ -1487,6 +1500,9 @@ fn test_cross_3d(
             for i in 0..w {
                 let val1 = slice1[i] as f64;
                 let val2 = slice2[i] as f64;
+                if !val1.is_finite() || !val2.is_finite() {
+                    continue;
+                }
 
                 let pixel_ssq = (val1 - val2).powi(2);
                 ssq += pixel_ssq;

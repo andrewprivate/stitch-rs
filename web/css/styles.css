@@ -511,6 +511,7 @@ body {
     display: flex;
     opacity: 1;
     border: 2px solid rgba(0, 0, 255, 0.25);
+    user-select: none;
 }
 
 .web-stitch .stitch-visualizer .image-container .interactive-tile .tile-label {

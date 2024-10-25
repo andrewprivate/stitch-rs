@@ -3074,7 +3074,7 @@ let utiftemp;;
                     if (i == 0) return;
                     continue;
                 }
-                if (prm.debug) log("   ".repeat(depth), tag, type, UTIF.tags[tag], arr);
+               // console.log("   ".repeat(depth), tag, type, arr.length);
 
                 ifd["t" + tag] = arr;
 
@@ -3555,6 +3555,7 @@ let utiftemp;;
                 area = w * h,
                 data = out.data;
             var img = new Uint8Array(area);
+           // console.log(img)
             //console.log(out);
             // 0: WhiteIsZero, 1: BlackIsZero, 2: RGB, 3: Palette color, 4: Transparency mask, 5: CMYK
             var intp = (out["t262"] ? out["t262"][0] : 2),
@@ -3566,7 +3567,7 @@ let utiftemp;;
             if (intp == 1 && bps == 32 && sfmt != 3) throw "e"; // sample format
             var bpl = Math.ceil(smpls * bps * w / 8);
 
-            //log("interpretation: ", intp, "smpls", smpls, "bps", bps, "sample format",sfmt, out);
+            //console.log("interpretation: ", intp, "smpls", smpls, "bps", bps, "sample format",sfmt, out);
 
             if (false) { } else if (intp == 0) {
                 scl = 1 / 256; // "Photopeatest.tif"
@@ -3644,7 +3645,7 @@ let utiftemp;;
                             var qi = (io + i),
                                 o = (off >>> 2) + i,
                                 px = f32[o];
-                            img[qi] = ~~(0.5 + 255 * px);
+                            img[qi] = ~~(px);
 
                         }
                 }

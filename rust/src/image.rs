@@ -542,6 +542,8 @@ pub fn read_tiff(file_path: &Path) -> Image3D {
         } else if let DecodingResult::U16(data) = image {
             vec.extend(data.iter().map(|x| *x as f32));
             max = max.max(u16::MAX);
+        } else if let DecodingResult::F32(data) = image {
+            vec.extend(data.iter().map(|x| *x));
         } else {
             panic!("Unsupported data type");
         }
@@ -575,14 +577,20 @@ pub fn read_tiff_headers(file_path: &Path) -> Image3DFile {
     let mut depth = 0;
     let width = decoder.dimensions().unwrap().0 as usize;
     let height = decoder.dimensions().unwrap().1 as usize;
-    let mut max = 0;
+    let mut max: f32 = 0.0;
+    let mut min: f32 = 0.0;
     loop {
         let image: DecodingResult = decoder.read_image().unwrap();
 
         if let DecodingResult::U8(data) = image {
-            max = max.max(255);
+            max = max.max(255.0);
         } else if let DecodingResult::U16(data) = image {
-            max = max.max(u16::MAX);
+            max = max.max(u16::MAX as f32);
+        } else if let DecodingResult::F32(data) = image {
+            data.iter().for_each(|x| {
+                max = max.max(*x);
+                min = min.min(*x);
+            });
         } else {
             panic!("Unsupported data type");
         }
@@ -600,8 +608,8 @@ pub fn read_tiff_headers(file_path: &Path) -> Image3DFile {
         depth,
         width,
         height,
-        min: 0.0,
-        max: max as f32,
+        min: min,
+        max: max,
         path: file_path.to_path_buf(),
     }
 }
