@@ -1,14 +1,14 @@
-import { GrayImage3D } from "../Image.mjs";
-import { FileUtils } from "../utils/FileUtils.mjs";
-import { ParallelImageParser } from "../worker/ParallelImageParser.mjs";
-import { FileBrowser, FileBrowserEntry } from "./FileBrowser.mjs";
-import { GridStitchSetup } from "./GridStitchSetup.mjs";
-import { LogTray } from "./LogTray.mjs";
-import { ContentPane, PaneCollection } from "./PaneCollection.mjs";
-import { Panel, ResizeablePanels } from "./ResizeablePanels.mjs";
-import { StitchVisualizer } from "./StitchVisualizer.mjs";
-import { TopControls } from "./TopControls.mjs";
-import { Viewer3DSlice, Viewer3DSliceWithControls } from "./Viewer3D.mjs";
+import { GrayImage3D } from "../Image.js";
+import { FileUtils } from "../utils/FileUtils.js";
+import { ParallelImageParser } from "../worker/ParallelImageParser.js";
+import { FileBrowser, FileBrowserEntry } from "./FileBrowser.js";
+import { GridpictestSetup } from "./GridpictestSetup.js";
+import { LogTray } from "./LogTray.js";
+import { ContentPane, PaneCollection } from "./PaneCollection.js";
+import { Panel, ResizeablePanels } from "./ResizeablePanels.js";
+import { pictestVisualizer } from "./pictestVisualizer.js";
+import { TopControls } from "./TopControls.js";
+import { Viewer3DSlice, Viewer3DSliceWithControls } from "./Viewer3D.js";
 
 export class Controller {
     constructor() {
@@ -44,7 +44,7 @@ export class Controller {
         }
 
         this.ui.container = document.createElement('div');
-        this.ui.container.classList.add('web-stitch');
+        this.ui.container.classList.add('web-pictest');
 
         this.topControls = new TopControls(this);
         this.ui.container.appendChild(this.topControls.getElement());
@@ -120,7 +120,7 @@ export class Controller {
 
     async openFolder() {
         const dirHandle = await window.showDirectoryPicker({
-            id: "stitch-input",
+            id: "pictest-input",
             mode: "readwrite"
         });
 
@@ -233,29 +233,29 @@ export class Controller {
             console.log(`Loaded ${done} of ${total} images (${progress.toFixed(2)}%)`);
         });
 
-        const stitchPane = new ContentPane();
-        this.ui.stitchPane = stitchPane;
-        stitchPane.setName("Grid Stitch Setup");
-        this.paneCollection.addPane(stitchPane);
+        const pictestPane = new ContentPane();
+        this.ui.pictestPane = pictestPane;
+        pictestPane.setName("Grid pictest Setup");
+        this.paneCollection.addPane(pictestPane);
 
-        this.stitchSetup = new GridStitchSetup(this);
-        stitchPane.getElement().appendChild(this.stitchSetup.getElement());
+        this.pictestSetup = new GridpictestSetup(this);
+        pictestPane.getElement().appendChild(this.pictestSetup.getElement());
 
-        this.addToRenderQueue(this.stitchSetup);
+        this.addToRenderQueue(this.pictestSetup);
 
         images = await images;
 
         console.log(`Extracted ${images.length} images.`);
 
-        // Find stitch_config.json
-        const config_file = this.entries.find(entry => entry.name === "stitch_config.json");
+        // Find pictest_config.json
+        const config_file = this.entries.find(entry => entry.name === "pictest_config.json");
         if (!config_file) {
-            console.log("No stitch_config.json found.");
+            console.log("No pictest_config.json found.");
             return;
         }
 
         const config = JSON.parse(await config_file.getText());
-        console.log("Loaded stitch_config.json", config);
+        console.log("Loaded pictest_config.json", config);
 
         const tiles = config.tile_paths.map(tile_path => {
             const tile = this.entries.find(entry => entry.name === tile_path);
@@ -296,13 +296,13 @@ export class Controller {
         }
 
         const pane = new ContentPane();
-        pane.setName("Stitch Preview");
+        pane.setName("pictest Preview");
         this.paneCollection.addPane(pane);
 
-        const viewer = new StitchVisualizer();
+        const viewer = new pictestVisualizer();
         viewer.setFuseMode(config.fuse_mode);
 
-        this.stitchVisualizer = viewer;
+        this.pictestVisualizer = viewer;
         
         const tileImages = await Promise.all(tiles.map(tile => tile.imagePromise));
 
@@ -370,7 +370,7 @@ export class Controller {
             pane.setName(`Subgraph ${index}`);
             this.paneCollection.addPane(pane);
 
-            const viewer = new StitchVisualizer();
+            const viewer = new pictestVisualizer();
             viewer.setFuseMode(config.fuse_mode);
             pane.getElement().appendChild(viewer.getElement());
             this.addToRenderQueue(viewer);
