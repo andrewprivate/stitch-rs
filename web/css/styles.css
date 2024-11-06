@@ -530,6 +530,10 @@ body {
     display: block;
 }
 
+.web-stitch .stitch-visualizer .image-container .interactive-tile.editing .tile-label {
+    display: none;
+}
+
 
 .web-stitch .stitch-visualizer .image-container .main-canvas {
     opacity: 1;

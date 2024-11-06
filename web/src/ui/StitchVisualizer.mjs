@@ -567,13 +567,19 @@ export class StitchVisualizer {
         for (let i = 0; i < this.images.length; i++) {
             const { x, y, z } = this.offsets[i];
             const { width, height, depth } = this.images[i];
+            const x0 = x - (width >> 1);
+            const y0 = y - (height >> 1);
+            const z0 = z - (depth >> 1);
+            const x1 = x0 + width;
+            const y1 = y0 + height;
+            const z1 = z0 + depth;
 
-            minX = Math.min(minX, x);
-            minY = Math.min(minY, y);
-            minZ = Math.min(minZ, z);
-            maxX = Math.max(maxX, x + width);
-            maxY = Math.max(maxY, y + height);
-            maxZ = Math.max(maxZ, z + depth);
+            minX = Math.min(minX, x0);
+            minY = Math.min(minY, y0);
+            minZ = Math.min(minZ, z0);
+            maxX = Math.max(maxX, x1);
+            maxY = Math.max(maxY, y1);
+            maxZ = Math.max(maxZ, z1);
         }
 
         // Check for infinities and throw error
@@ -589,21 +595,22 @@ export class StitchVisualizer {
         let original_offset = { ...this.offsets[imageIndex] };
         const direction = this.sliceDirection;
         const offsets = this.offsets[imageIndex];
+        const { width, height, depth } = this.images[imageIndex];
         switch (direction) {
             case SliceDirection.X:
-                if (newoff.x !== undefined) offsets.z = newoff.x;
-                if (newoff.y !== undefined) offsets.y = newoff.y;
-                if (newoff.z !== undefined) offsets.x = newoff.z;
+                if (newoff.x !== undefined) offsets.z = newoff.x + (depth >> 1);
+                if (newoff.y !== undefined) offsets.y = newoff.y + (height >> 1);
+                if (newoff.z !== undefined) offsets.x = newoff.z + (width >> 1);
                 break;
             case SliceDirection.Y:
-                if (newoff.x !== undefined) offsets.x = newoff.x;
-                if (newoff.y !== undefined) offsets.z = newoff.y;
-                if (newoff.z !== undefined) offsets.y = newoff.z;
+                if (newoff.x !== undefined) offsets.x = newoff.x + (width >> 1);
+                if (newoff.y !== undefined) offsets.z = newoff.y + (depth >> 1);
+                if (newoff.z !== undefined) offsets.y = newoff.z + (height >> 1);
                 break;
             case SliceDirection.Z:
-                if (newoff.x !== undefined) offsets.x = newoff.x;
-                if (newoff.y !== undefined) offsets.y = newoff.y;
-                if (newoff.z !== undefined) offsets.z = newoff.z;
+                if (newoff.x !== undefined) offsets.x = newoff.x + (width >> 1);
+                if (newoff.y !== undefined) offsets.y = newoff.y + (height >> 1);
+                if (newoff.z !== undefined) offsets.z = newoff.z + (depth >> 1);
                 break;
         }
 
@@ -618,29 +625,36 @@ export class StitchVisualizer {
     }
 
     getOffsetForImage(imageIndex) {
-        const offsets = this.offsets[imageIndex];
+        const { x, y, z } = this.offsets[imageIndex];
+        const {width, height, depth} = this.images[imageIndex];
+        const x0 = x - (width >> 1);
+        const y0 = y - (height >> 1);
+        const z0 = z - (depth >> 1);
         const direction = this.sliceDirection;
 
         switch (direction) {
             case SliceDirection.X:
-                return { x: offsets.z, y: offsets.y, z: offsets.x };
+                return { x: z0, y: y0, z: x0 };
             case SliceDirection.Y:
-                return { x: offsets.x, y: offsets.z, z: offsets.y };
+                return { x: x0, y: z0, z: y0 };
             case SliceDirection.Z:
-                return { x: offsets.x, y: offsets.y, z: offsets.z };
+                return { x: x0, y: y0, z: z0 };
         }
     }
 
     getBoundsForImage(imageIndex) {
         const { x, y, z } = this.offsets[imageIndex];
         const { width, height, depth } = this.images[imageIndex];
+        const x0 = x - (width >> 1);
+        const y0 = y - (height >> 1);
+        const z0 = z - (depth >> 1);
         switch (this.sliceDirection) {
             case SliceDirection.X:
-                return { minX: z, minY: y, maxX: z + depth, maxY: y + height, minZ: x, maxZ: x + width, width: depth, height: height, depth: width };
+                return { minX: z0, minY: y0, maxX: z0 + depth, maxY: y0 + height, minZ: x0, maxZ: x0 + width, width: depth, height: height, depth: width };
             case SliceDirection.Y:
-                return { minX: x, minY: z, maxX: x + width, maxY: z + depth, minZ: y, maxZ: y + height, width: width, height: depth, depth: height };
+                return { minX: x0, minY: z0, maxX: x0 + width, maxY: z0 + depth, minZ: y0, maxZ: y0 + height, width: width, height: depth, depth: height };
             case SliceDirection.Z:
-                return { minX: x, minY: y, maxX: x + width, maxY: y + height, minZ: z, maxZ: z + depth, width: width, height: height, depth: depth };
+                return { minX: x0, minY: y0, maxX: x0 + width, maxY: y0 + height, minZ: z0, maxZ: z0 + depth, width: width, height: height, depth: depth };
         }
     }
 
@@ -781,7 +795,6 @@ export class StitchVisualizer {
     updateOffsets() {
         this.invalidateCache();
         this.viewers.forEach((viewer, i) => {
-            const offset = this.getOffsetForImage(i);
             const newIndex = this.getCurrentSliceForImage(i);
             if (newIndex < 0 || newIndex >= viewer.getSliceCount()) {
                 viewer.canvas.style.display = 'none';
