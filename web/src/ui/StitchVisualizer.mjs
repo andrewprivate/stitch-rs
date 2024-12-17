@@ -26,7 +26,7 @@ export class StitchVisualizer {
     getCurrentSliceForImage(imageIndex) {
         const bounds = this.getFrameBounds();
         const offset = this.getOffsetForImage(imageIndex);
-        return this.currentSliceFromMiddle + (Math.floor(bounds.depth / 2) + bounds.minZ)- offset.z;
+        return this.currentSliceFromMiddle + (Math.floor(bounds.depth / 2) + bounds.minZ) - offset.z;
     }
 
     getSliceBounds() {
@@ -154,7 +154,7 @@ export class StitchVisualizer {
         this.fuseMode = mode;
         this.requestFusedRender();
     }
-    
+
     setupUI() {
         this.ui.container = document.createElement('div');
         this.ui.container.classList.add('stitch-visualizer');
@@ -311,6 +311,27 @@ export class StitchVisualizer {
         this.ui.imagesContainer.tabIndex = -1;
         this.ui.imagesContainer.addEventListener('keydown', (event) => {
             const sliceBounds = this.getSliceBounds();
+            if (this.isEditing) {
+                if (event.code === 'ArrowUp') {
+                    const offset = this.getOffsetForImage(this.editingTileIndex);
+                    this.setOffsetForImage(this.editingTileIndex, {
+                        z: offset.z - 1
+                    }, window.repeat || 1);
+                    this.updateOffsets();
+                    this.requestFusedRender();
+
+                    event.preventDefault();
+                } else if (event.code === 'ArrowDown') {
+                    const offset = this.getOffsetForImage(this.editingTileIndex);
+                    this.setOffsetForImage(this.editingTileIndex, {
+                        z: offset.z + 1
+                    }, window.repeat || 1);
+                    this.updateOffsets();
+                    this.requestFusedRender();
+
+                    event.preventDefault();
+                }
+            }
             if (event.code === 'ArrowLeft') {
                 this.setSliceIndex(Utils.clamp(this.currentSliceFromMiddle - 1, sliceBounds.min, sliceBounds.max));
             } else if (event.code === 'ArrowRight') {
@@ -462,6 +483,7 @@ export class StitchVisualizer {
 
         this.mouseDownListener = mouseDownListener;
         this.editingTile = this.interactiveTiles[i];
+        this.editingTileIndex = i;
         this.editingTile.classList.add('editing');
         this.ui.imagesContainer.classList.add('editing');
         this.interactiveTiles[i].addEventListener('mousedown', mouseDownListener);
@@ -567,9 +589,9 @@ export class StitchVisualizer {
         for (let i = 0; i < this.images.length; i++) {
             const { x, y, z } = this.offsets[i];
             const { width, height, depth } = this.images[i];
-            const x0 = x - (width >> 1);
-            const y0 = y - (height >> 1);
-            const z0 = z - (depth >> 1);
+            const x0 = x //- (width >> 1);
+            const y0 = y //- (height >> 1);
+            const z0 = z //- (depth >> 1);
             const x1 = x0 + width;
             const y1 = y0 + height;
             const z1 = z0 + depth;
@@ -598,19 +620,19 @@ export class StitchVisualizer {
         const { width, height, depth } = this.images[imageIndex];
         switch (direction) {
             case SliceDirection.X:
-                if (newoff.x !== undefined) offsets.z = newoff.x + (depth >> 1);
-                if (newoff.y !== undefined) offsets.y = newoff.y + (height >> 1);
-                if (newoff.z !== undefined) offsets.x = newoff.z + (width >> 1);
+                if (newoff.x !== undefined) offsets.z = newoff.x //+ (depth >> 1);
+                if (newoff.y !== undefined) offsets.y = newoff.y //+ (height >> 1);
+                if (newoff.z !== undefined) offsets.x = newoff.z //+ (width >> 1);
                 break;
             case SliceDirection.Y:
-                if (newoff.x !== undefined) offsets.x = newoff.x + (width >> 1);
-                if (newoff.y !== undefined) offsets.z = newoff.y + (depth >> 1);
-                if (newoff.z !== undefined) offsets.y = newoff.z + (height >> 1);
+                if (newoff.x !== undefined) offsets.x = newoff.x //+ (width >> 1);
+                if (newoff.y !== undefined) offsets.z = newoff.y //+ (depth >> 1);
+                if (newoff.z !== undefined) offsets.y = newoff.z //+ (height >> 1);
                 break;
             case SliceDirection.Z:
-                if (newoff.x !== undefined) offsets.x = newoff.x + (width >> 1);
-                if (newoff.y !== undefined) offsets.y = newoff.y + (height >> 1);
-                if (newoff.z !== undefined) offsets.z = newoff.z + (depth >> 1);
+                if (newoff.x !== undefined) offsets.x = newoff.x //+ (width >> 1);
+                if (newoff.y !== undefined) offsets.y = newoff.y //+ (height >> 1);
+                if (newoff.z !== undefined) offsets.z = newoff.z //+ (depth >> 1);
                 break;
         }
 
@@ -626,10 +648,10 @@ export class StitchVisualizer {
 
     getOffsetForImage(imageIndex) {
         const { x, y, z } = this.offsets[imageIndex];
-        const {width, height, depth} = this.images[imageIndex];
-        const x0 = x - (width >> 1);
-        const y0 = y - (height >> 1);
-        const z0 = z - (depth >> 1);
+        const { width, height, depth } = this.images[imageIndex];
+        const x0 = x;
+        const y0 = y;
+        const z0 = z;
         const direction = this.sliceDirection;
 
         switch (direction) {
@@ -645,9 +667,9 @@ export class StitchVisualizer {
     getBoundsForImage(imageIndex) {
         const { x, y, z } = this.offsets[imageIndex];
         const { width, height, depth } = this.images[imageIndex];
-        const x0 = x - (width >> 1);
-        const y0 = y - (height >> 1);
-        const z0 = z - (depth >> 1);
+        const x0 = x;
+        const y0 = y;
+        const z0 = z;
         switch (this.sliceDirection) {
             case SliceDirection.X:
                 return { minX: z0, minY: y0, maxX: z0 + depth, maxY: y0 + height, minZ: x0, maxZ: x0 + width, width: depth, height: height, depth: width };
