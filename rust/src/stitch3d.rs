@@ -419,15 +419,15 @@ pub fn stitch(
                     // Adjust peaks by roi
                     // find roi center pos
                     let ref_roi_center = (
-                        ref_roi.x + ref_roi.width / 2,
-                        ref_roi.y + ref_roi.height / 2,
-                        ref_roi.z + ref_roi.depth / 2,
+                        ref_roi.x, // + ref_roi.width / 2,
+                        ref_roi.y, //+ ref_roi.height / 2,
+                        ref_roi.z //+ ref_roi.depth / 2,
                     );
 
                     let mov_roi_center = (
-                        mov_roi.x + mov_roi.width / 2,
-                        mov_roi.y + mov_roi.height / 2,
-                        mov_roi.z + mov_roi.depth / 2,
+                        mov_roi.x, //+ mov_roi.width / 2,
+                        mov_roi.y, //+ mov_roi.height / 2,
+                        mov_roi.z //+ mov_roi.depth / 2,
                     );
 
                     let diff = (
