@@ -865,7 +865,7 @@ pub fn otsu_threshold(data: &[f32]) -> f32 {
 }
 
 pub fn normalize2(path: &Path) {
-    let blurred_file_path = path.with_extension("blurred.tiff");
+    let blurred_file_path = path.with_extension("blurred.tif");
     // check if exists
     let blurred_file = if !blurred_file_path.exists() {
         println!("Creating blurred file");
@@ -991,7 +991,7 @@ pub fn normalize2(path: &Path) {
             }
         });
 
-    let output_file = path.with_extension("normalized.tiff");
+    let output_file = path.with_extension("normalized.tif");
     save_as_tiff_float(&output_file, &image);
 }
 
