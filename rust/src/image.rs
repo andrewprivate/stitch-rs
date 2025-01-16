@@ -187,8 +187,10 @@ impl Image2D {
         let mut min = f32::MAX;
         let mut max = f32::MIN;
         for i in 0..self.data.len() {
-            min = min.min(self.data[i]);
-            max = max.max(self.data[i]);
+            if self.data[i].is_finite() {
+                min = min.min(self.data[i]);
+                max = max.max(self.data[i]);
+            }
         }
         (min, max)
     }
@@ -587,6 +589,9 @@ pub fn read_tiff_headers(file_path: &Path) -> Image3DFile {
             max = max.max(u16::MAX as f32);
         } else if let DecodingResult::F32(data) = image {
             data.iter().for_each(|x| {
+                if !x.is_finite() {
+                    return;
+                }
                 max = max.max(*x);
                 min = min.min(*x);
             });
@@ -638,4 +643,20 @@ pub fn save_image_2d(file_path: &PathBuf, image: &Image2D) {
     let buffer = image2d_to_u16(image);
     let img = image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_raw(width, height, buffer).unwrap();
     img.save(file_path).unwrap();
+}
+
+pub fn save_as_tiff_float(
+    file_path: &PathBuf,
+    image: &Image3D
+) {
+    let width = image.width;
+    let height = image.height;
+    let depth = image.depth;
+
+
+    let mut tiff = tiff::encoder::TiffEncoder::new_big(std::fs::File::create(file_path).unwrap()).unwrap();
+    for i in 0..depth {
+        let frame = &image.data[i * width * height..(i + 1) * width * height];
+        tiff.write_image::<tiff::encoder::colortype::Gray32Float>(width as u32, height as u32, &frame).unwrap();
+    }
 }

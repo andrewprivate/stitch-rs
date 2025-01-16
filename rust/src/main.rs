@@ -1,12 +1,14 @@
-use fuse::{fuse_2d, fuse_3d, FuseMode};
+use fuse::{fuse_2d, fuse_3d, fuse_3d_float, FuseMode};
 use image::{
-    read_dcm_headers, read_image_2d, read_tiff_headers, save_as_dcm_8, save_image_2d,
+    read_dcm, read_dcm_headers, read_image_2d, read_tiff, read_tiff_headers, save_as_dcm_8,
+    save_as_tiff_float, save_image_2d, Image3D,
 };
 use rayon::prelude::*;
 use serde_json::*;
 use std::path::{Path, PathBuf};
 use stitch2d::IBox2D;
 use stitch3d::IBox3D;
+use transpose::transpose_inplace;
 
 mod fuse;
 mod image;
@@ -22,6 +24,15 @@ pub enum StitchMode {
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
 
+    if args[1] == "normalize" {
+        if args.len() < 3 {
+            println!("Usage: cmd normalize file.tiff");
+            return;
+        }
+        normalize2(Path::new(&args[2]));
+        return;
+    }
+
     if args.len() < 2 {
         println!("Usage: cmd config_file.json");
         return;
@@ -34,19 +45,26 @@ fn main() {
     }
     let mut config = read_config_file(config_path);
     let mut i = 2;
+    let mut normalize = false;
     while i < args.len() {
         match args[i].as_str() {
             "-o" => {
                 i += 1;
                 config.output_path = PathBuf::from(&args[i]);
             }
-            "-no-fuse" => {
+            "--save-float" => {
+                config.save_float = true;
+            }
+            "--no-fuse" => {
                 config.no_fuse = true;
             }
-            "-copy" => {
+            "--copy" => {
                 config.copy_files = true;
             }
-            "-fuse-mode" => {
+            "--normalize" => {
+                normalize = true;
+            }
+            "--fuse-mode" => {
                 i += 1;
                 match args[i].as_str() {
                     "average" => {
@@ -86,6 +104,11 @@ fn main() {
         std::fs::create_dir_all(&config.output_path).unwrap();
     }
 
+    if normalize {
+        normalize_brightness(&config);
+        return;
+    }
+
     match config.mode {
         StitchMode::TwoD => {
             stitch_2d(config);
@@ -116,6 +139,7 @@ pub struct StitchConfig {
     pub use_prior: bool,
     pub prior_sigmas: (f32, f32, f32),
     pub merge_subgraphs: bool,
+    pub save_float: bool,
 }
 
 impl StitchConfig {
@@ -123,6 +147,7 @@ impl StitchConfig {
         StitchConfig {
             version: "1.0".to_string(),
             mode: StitchMode::TwoD,
+            save_float: false,
             overlap_ratio: (0.2, 0.2, 0.2),
             correlation_threshold: 0.3,
             relative_error_threshold: 2.5,
@@ -139,7 +164,7 @@ impl StitchConfig {
             use_phase_correlation: true,
             use_prior: false,
             prior_sigmas: (10.0, 10.0, 10.0),
-            merge_subgraphs: true
+            merge_subgraphs: true,
         }
     }
 }
@@ -211,6 +236,12 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
     if !json.get("check_peaks").is_none() {
         config.check_peaks = json["check_peaks"].as_u64().unwrap() as usize;
         println!("Check peaks: {}", config.check_peaks);
+    }
+
+    // Check save float
+    if !json.get("save_float").is_none() {
+        config.save_float = json["save_float"].as_bool().unwrap();
+        println!("Save float: {}", config.save_float);
     }
 
     // Check dimension mask
@@ -313,13 +344,19 @@ pub fn read_config_file(path: &Path) -> StitchConfig {
     // Check absolute error threshold
     if !json.get("absolute_error_threshold").is_none() {
         config.absolute_error_threshold = json["absolute_error_threshold"].as_f64().unwrap() as f32;
-        println!("Absolute error threshold: {}", config.absolute_error_threshold);
+        println!(
+            "Absolute error threshold: {}",
+            config.absolute_error_threshold
+        );
     }
 
     // Check relative error threshold
     if !json.get("relative_error_threshold").is_none() {
         config.relative_error_threshold = json["relative_error_threshold"].as_f64().unwrap() as f32;
-        println!("Relative error threshold: {}", config.relative_error_threshold);
+        println!(
+            "Relative error threshold: {}",
+            config.relative_error_threshold
+        );
     }
 
     // Check output path
@@ -591,17 +628,30 @@ fn stitch_3d(config: StitchConfig) {
         .iter()
         .enumerate()
         .for_each(|(i, offset)| {
-            let fused_image = fuse_3d(
-                &images,
-                &stitched_result.subgraphs[i],
-                offset,
-                config.fuse_mode,
-            );
+            if config.save_float {
+                let fused_image = fuse_3d_float(
+                    &images,
+                    &stitched_result.subgraphs[i],
+                    offset,
+                    config.fuse_mode,
+                );
 
-            let output_file = format!("fused_{}.dcm", i);
-            let buf = config.output_path.join(output_file);
-            let path = buf.as_path();
-            save_as_dcm_8(path, fused_image);
+                let output_file = format!("fused_{}.tiff", i);
+                let buf = config.output_path.join(output_file);
+                save_as_tiff_float(&buf, &fused_image);
+            } else {
+                let fused_image = fuse_3d(
+                    &images,
+                    &stitched_result.subgraphs[i],
+                    offset,
+                    config.fuse_mode,
+                );
+
+                let output_file = format!("fused_{}.dcm", i);
+                let buf = config.output_path.join(output_file);
+                let path = buf.as_path();
+                save_as_dcm_8(path, fused_image);
+            }
         });
 
     println!("Time to fuse images: {:?}", start.elapsed());
@@ -697,4 +747,280 @@ fn stitch_2d(config: StitchConfig) {
         });
 
     println!("Time to fuse images: {:?}", start.elapsed());
+}
+
+pub fn normalize_brightness(config: &StitchConfig) {
+    let mut tile_paths = config.tile_paths.clone();
+    // New directory /normalized
+    let mut normalized_path = config.output_path.join("normalized");
+    if !normalized_path.exists() {
+        std::fs::create_dir_all(&normalized_path).unwrap();
+    }
+
+    // Get mean brightness
+    let mean_brightness = 1.0;
+
+    println!("Mean brightness: {}", mean_brightness);
+
+    // Normalize brightness
+    tile_paths.iter().enumerate().for_each(|(i, path)| {
+        let image = if path.extension().unwrap() == "dcm" {
+            read_dcm(&path)
+        } else {
+            read_tiff(&path)
+        };
+
+        // let brightness = image.data.par_chunks(image.width as usize * image.height as usize).map(|chunk| {
+        //     chunk.iter().map(|x| if x.is_finite() { x } else { &0.0 }).sum::<f32>()
+        // }).sum::<f32>() / image.data.len() as f32;
+
+        let brightness = otsu_threshold(&image.data);
+
+        let normalized = image
+            .data
+            .iter()
+            .map(|x| x * mean_brightness / brightness)
+            .collect::<Vec<_>>();
+        let normalized_image = Image3D {
+            width: image.width,
+            height: image.height,
+            depth: image.depth,
+            data: normalized,
+            min: 0.0,
+            max: 0.0,
+        };
+
+        let output_file = normalized_path.join(path.file_name().unwrap());
+
+        save_as_tiff_float(&output_file, &normalized_image);
+
+        println!("Normalized file saved to: {:?}", output_file);
+    });
+}
+
+pub fn otsu_threshold(data: &[f32]) -> f32 {
+    let mut data = data.to_vec();
+    data.retain(|&x| x.is_finite());
+
+    if data.len() == 0 {
+        return f32::NEG_INFINITY;
+    }
+
+    let max_value: f32 = data.iter().fold(data[0], |acc, &x| acc.max(x)) + 1.0;
+    let min_value: f32 = data.iter().fold(data[0], |acc, &x| acc.min(x));
+
+    let diff = max_value - min_value;
+
+    let hist_size = 512;
+    let mut hist = vec![0; hist_size];
+    for i in 0..data.len() {
+        let index = ((data[i] - min_value) / diff * hist_size as f32)
+            .floor()
+            .clamp(0.0, (hist_size - 1) as f32) as usize;
+        hist[index] += 1;
+    }
+
+    // Sum histogram, weighted
+    let mut sum = 0.0;
+    for i in 0..hist_size {
+        sum += (hist[i] as f32) * ((i as f32 / hist_size as f32) * diff + min_value);
+    }
+
+    let mut background_sum = 0.0;
+    let mut background_weight = 0.0;
+
+    let mut max_variance = 0.0;
+    let mut best_threshold = 0.0;
+
+    for i in 0..hist_size {
+        let threshold = (i as f32 / hist_size as f32 + 0.0 / hist_size as f32) * diff + min_value;
+        background_weight += hist[i] as f32;
+        if background_weight == 0.0 {
+            continue;
+        }
+
+        let foreground_weight = data.len() as f32 - background_weight;
+        if foreground_weight == 0.0 {
+            break;
+        }
+
+        background_sum += threshold * hist[i] as f32;
+        let foreground_sum = sum - background_sum;
+
+        //  println!("Background Sum: {}, Background Weight: {}, Foreground Sum: {}, Foreground Weight: {}, hist: {}", background_sum, background_weight, foreground_sum, foreground_weight, hist[i]);
+
+        let background_mean = background_sum / background_weight;
+        let foreground_mean = foreground_sum / foreground_weight;
+
+        let mean_diff_sq = (background_mean - foreground_mean).powi(2);
+        let variance = background_weight * foreground_weight * mean_diff_sq;
+
+        if variance > max_variance {
+            max_variance = variance;
+            best_threshold = threshold;
+        }
+    }
+
+    best_threshold
+}
+
+pub fn normalize2(path: &Path) {
+    let blurred_file_path = path.with_extension("blurred.tiff");
+    // check if exists
+    let blurred_file = if !blurred_file_path.exists() {
+        println!("Creating blurred file");
+        let mut image = read_tiff(path);
+        let kw = 10;
+        let kh = kw;
+        let kd = kw;
+
+        let kernel = generate_guassian_kernel_3d(kw, 1, 1, 20.0);
+
+        for i in 0..5 {
+            // Process x
+            image
+                .data
+                .par_chunks_exact_mut(image.width)
+                .for_each(|chunk| {
+                    let copy = chunk.to_vec();
+                    for x in 0..image.width {
+                        let mut sum = 0.0;
+                        let mut weight_sum = 0.0;
+                        for kx in 0..kw {
+                            let x2 = x as i32 + kx as i32 - kw as i32 / 2;
+                            if x2 >= 0 && x2 < image.width as i32 && copy[x2 as usize].is_finite() {
+                                let val = copy[x2 as usize];
+                                let weight = kernel[kx];
+                                sum += val * weight;
+                                weight_sum += weight;
+                            }
+                        }
+                        chunk[x] = sum / weight_sum;
+                    }
+                });
+
+            println!("Processed x");
+
+            // Process y
+            image
+                .data
+                .par_chunks_exact_mut(image.width * image.height)
+                .for_each(|chunk| {
+                    let mut copy = vec![0.0; chunk.len()];
+                    transpose::transpose(chunk, &mut copy, image.width, image.height);
+                    for x in 0..image.width {
+                        for y in 0..image.height {
+                            let mut sum = 0.0;
+                            let mut weight_sum = 0.0;
+                            for ky in 0..kh {
+                                let y2 = y as i32 + ky as i32 - kh as i32 / 2;
+                                if y2 >= 0
+                                    && y2 < image.height as i32
+                                    && copy[x * image.height + y2 as usize].is_finite()
+                                {
+                                    let val = copy[x * image.height + y2 as usize];
+                                    let weight = kernel[ky];
+                                    sum += val * weight;
+                                    weight_sum += weight;
+                                }
+                            }
+                            chunk[y * image.width + x] = sum / weight_sum;
+                        }
+                    }
+                });
+
+            println!("Processed y");
+
+            // Process z
+            let mut scratch = vec![0.0; image.depth];
+
+            for x in 0..image.width {
+                for y in 0..image.height {
+                    for z in 0..image.depth {
+                        scratch[z] =
+                            image.data[z * image.width * image.height + y * image.width + x];
+                    }
+
+                    for z in 0..image.depth {
+                        let mut sum = 0.0;
+                        let mut weight_sum = 0.0;
+                        for kz in 0..kd {
+                            let z2 = z as i32 + kz as i32 - kd as i32 / 2;
+                            if z2 >= 0
+                                && z2 < image.depth as i32
+                                && scratch[z2 as usize].is_finite()
+                            {
+                                let val = scratch[z2 as usize];
+                                let weight = kernel[kz];
+                                sum += val * weight;
+                                weight_sum += weight;
+                            }
+                        }
+                        image.data[z * image.width * image.height + y * image.width + x] =
+                            sum / weight_sum;
+                    }
+                }
+            }
+
+            println!("Processed z");
+
+            println!("Iteration: {}", i);
+        }
+        save_as_tiff_float(&blurred_file_path, &image);
+
+        image
+    } else {
+        println!("Reading blurred file");
+        read_tiff(&blurred_file_path)
+    };
+
+    // Threshold
+    //let threshold = otsu_threshold(&blurred_file.data);
+    //println!("Threshold: {}", threshold);
+
+    // Normalize
+    let mut image = read_tiff(path);
+
+    image
+        .data
+        .iter_mut()
+        .zip(blurred_file.data.iter())
+        .for_each(|(x, y)| {
+            if y.is_finite() && *y > f32::EPSILON {
+                *x = *x / y;
+            }
+        });
+
+    let output_file = path.with_extension("normalized.tiff");
+    save_as_tiff_float(&output_file, &image);
+}
+
+pub fn generate_guassian_kernel_3d(
+    width: usize,
+    height: usize,
+    depth: usize,
+    sigma: f32,
+) -> Vec<f32> {
+    let mut kernel = vec![0.0; width * height * depth];
+    let sigma_sqr = sigma * sigma;
+    let half_width = width / 2;
+    let half_height = height / 2;
+    let half_depth = depth / 2;
+    let mut sum = 0.0;
+    for zi in 0..depth {
+        for yi in 0..height {
+            for xi in 0..width {
+                let x = xi as f32 - half_width as f32;
+                let y = yi as f32 - half_height as f32;
+                let z = zi as f32 - half_depth as f32;
+                let value = (-(x * x + y * y + z * z) / (2.0 * sigma_sqr)).exp();
+                kernel[zi * width * height + yi * width + xi] = value;
+                sum += value;
+            }
+        }
+    }
+    for i in 0..kernel.len() {
+        kernel[i] /= sum;
+    }
+    kernel
 }
