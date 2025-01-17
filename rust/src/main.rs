@@ -976,17 +976,12 @@ pub fn normalize2(path: &Path) {
 
     let blurred_file_path2 = path.with_extension("blurred2.tif");
 
-    let mut mean = 0.0;
-    let mut count = 0;
+    let mut max: f32 = 0.0;
     blurred_file.data.iter().for_each(|x| {
         if x.is_finite() {
-            mean += x;
-            count += 1;
+            max = max.max(*x);
         }
     });
-
-    mean /= count as f32;
-
     // Threshold
     //let threshold = otsu_threshold(&blurred_file.data);
     //println!("Threshold: {}", threshold);
@@ -1000,7 +995,7 @@ pub fn normalize2(path: &Path) {
         .zip(blurred_file.data.iter())
         .for_each(|(x, y)| {
             if y.is_finite() && *y > f32::EPSILON {
-                *x = *x * mean / y;
+                *x = *x * max / y;
             }
         });
 
