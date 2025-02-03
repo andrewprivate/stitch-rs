@@ -568,6 +568,18 @@ export class GridStitchSetup {
         return JSON.stringify(obj, null, 4);
     }
 
+    async setOffsets(offsets) {
+        console.log("Setting offsets", offsets);
+        if (this.tileEntries.length <= offsets.length) {
+            this.gridTiles = this.tileEntries.slice(0, offsets.length);
+            this.gridOffsets = offsets;
+            const images = await Promise.all(this.gridTiles.map(entry => entry.entry.imagePromise));
+            this.ui.stitchPreview.setImages(images, this.gridOffsets, this.gridTiles.map((tile, i) => {
+                return tile.values[0] + ' - ' + tile.values[1];
+            }));
+        }
+    }
+
     generateTileConfiguration() {
         const lines = [];
         lines.push("# Define the number of dimensions we are working on");
