@@ -3074,7 +3074,7 @@ let utiftemp;;
                     if (i == 0) return;
                     continue;
                 }
-               // console.log("   ".repeat(depth), tag, type, arr.length);
+                // console.log("   ".repeat(depth), tag, type, arr.length);
 
                 ifd["t" + tag] = arr;
 
@@ -3296,7 +3296,7 @@ let utiftemp;;
                             img[qi] = img[qi + 1] = img[qi + 2] = Math.min(255, ~~(px * scl));
                             img[qi + 3] = 255;
                         } // ladoga.tif
-                    if (bps == 32)
+                    if (bps == 32) {
                         for (var i = 0; i < w; i++) {
                             var qi = (io + i) << 2,
                                 o = (off >>> 2) + i,
@@ -3304,6 +3304,7 @@ let utiftemp;;
                             img[qi] = img[qi + 1] = img[qi + 2] = ~~(0.5 + 255 * px);
                             img[qi + 3] = 255;
                         }
+                    }
                 }
             } else if (intp == 2) {
                 if (bps == 8) {
@@ -3555,7 +3556,7 @@ let utiftemp;;
                 area = w * h,
                 data = out.data;
             var img = new Uint8Array(area);
-           // console.log(img)
+            // console.log(img)
             //console.log(out);
             // 0: WhiteIsZero, 1: BlackIsZero, 2: RGB, 3: Palette color, 4: Transparency mask, 5: CMYK
             var intp = (out["t262"] ? out["t262"][0] : 2),
@@ -3608,6 +3609,28 @@ let utiftemp;;
                 if (scl == null) scl = 1 / 256;
                 var f32 = ((data.length & 3) == 0) ? new Float32Array(data.buffer) : null;
 
+                let min = Infinity;
+                let max = -Infinity;
+                if (bps == 32) {
+                    for (var y = 0; y < h; y++) {
+                        var off = y * bpl,
+                            io = y * w;
+
+
+                        for (var i = 0; i < w; i++) {
+                            var o = (off >>> 2) + i,
+                                px = f32[o];
+                            if (isFinite(px)) {
+                                min = Math.min(min, px);
+                                max = Math.max(max, px);
+                            }
+                        }
+                    }
+                }
+
+                if (!isFinite(min)) min = 0;
+                if (!isFinite(max)) max = 1;
+
                 for (var y = 0; y < h; y++) {
                     var off = y * bpl,
                         io = y * w;
@@ -3640,14 +3663,14 @@ let utiftemp;;
                             img[qi] = Math.min(255, ~~(px * scl));
 
                         } // ladoga.tif
-                    if (bps == 32)
+                    if (bps == 32) {
                         for (var i = 0; i < w; i++) {
                             var qi = (io + i),
                                 o = (off >>> 2) + i,
                                 px = f32[o];
-                            img[qi] = ~~(px);
-
+                            img[qi] = Math.min(255, Math.max(0, Math.floor(255 * (px - min) / (max - min))));
                         }
+                    }
                 }
             } else if (intp == 2) {
                 if (bps == 8) {
@@ -3706,13 +3729,13 @@ let utiftemp;;
                         for (var i = 0; i < area; i++) {
                             var qi = i,
                                 ti = i * 3;
-                            img[qi] = rgb2gray(~~(0.5 + ndt[ti] * 255),~~(0.5 + ndt[ti + 1] * 255), ~~(0.5 + ndt[ti + 2] * 255));
+                            img[qi] = rgb2gray(~~(0.5 + ndt[ti] * 255), ~~(0.5 + ndt[ti + 1] * 255), ~~(0.5 + ndt[ti + 2] * 255));
                         }
                     else if (smpls == 4)
                         for (var i = 0; i < area; i++) {
                             var qi = i,
                                 ti = i * 4;
-                            img[qi] = rgb2gray(~~(0.5 + ndt[ti] * 255),~~(0.5 + ndt[ti + 1] * 255), ~~(0.5 + ndt[ti + 2] * 255));
+                            img[qi] = rgb2gray(~~(0.5 + ndt[ti] * 255), ~~(0.5 + ndt[ti + 1] * 255), ~~(0.5 + ndt[ti + 2] * 255));
                         }
                     else throw smpls;
                 } else throw bps;
@@ -3747,13 +3770,13 @@ let utiftemp;;
                             Y = data[si + 2],
                             K = data[si + 3];
                         var c = UDOC.C.cmykToRgb([C * (1 / 255), M * (1 / 255), Y * (1 / 255), K * (1 / 255)]);
-                        img[qi] = rgb2gray(~~(0.5 + 255 * c[0]),~~(0.5 + 255 * c[1]),~~(0.5 + 255 * c[2]));
+                        img[qi] = rgb2gray(~~(0.5 + 255 * c[0]), ~~(0.5 + 255 * c[1]), ~~(0.5 + 255 * c[2]));
                     } else {
                         var C = 255 - data[si],
                             M = 255 - data[si + 1],
                             Y = 255 - data[si + 2],
                             K = (255 - data[si + 3]) * (1 / 255);
-                        img[qi] = rgb2gray(~~(C * K + 0.5),~~(M * K + 0.5),~~(Y * K + 0.5));
+                        img[qi] = rgb2gray(~~(C * K + 0.5), ~~(M * K + 0.5), ~~(Y * K + 0.5));
                     }
                 }
             } else if (intp == 6 && out["t278"]) { // only for DSC_1538.TIF
@@ -3773,7 +3796,7 @@ let utiftemp;;
                         var g = Y - ((Cb >> 2) + (Cb >> 4) + (Cb >> 5)) - ((Cr >> 1) + (Cr >> 3) + (Cr >> 4) + (Cr >> 5));
                         var b = Y + (Cb + (Cb >> 1) + (Cb >> 2) + (Cb >> 6));
 
-                        img[qi] = rgb2gray(Math.max(0, Math.min(255, r)),Math.max(0, Math.min(255, g)),Math.max(0, Math.min(255, b)));
+                        img[qi] = rgb2gray(Math.max(0, Math.min(255, r)), Math.max(0, Math.min(255, g)), Math.max(0, Math.min(255, b)));
 
                     }
                 }
@@ -3814,7 +3837,7 @@ let utiftemp;;
                             Y = yr * (100 / 100),
                             Z = zr * (82.49 / 100);
 
-                        img[qi] = rgb2gray(Math.max(0, Math.min(255, gamma(X * M[0] + Y * M[1] + Z * M[2]) * 255)), Math.max(0, Math.min(255, gamma(X * M[3] + Y * M[4] + Z * M[5]) * 255)),Math.max(0, Math.min(255, gamma(X * M[6] + Y * M[7] + Z * M[8]) * 255)));
+                        img[qi] = rgb2gray(Math.max(0, Math.min(255, gamma(X * M[0] + Y * M[1] + Z * M[2]) * 255)), Math.max(0, Math.min(255, gamma(X * M[3] + Y * M[4] + Z * M[5]) * 255)), Math.max(0, Math.min(255, gamma(X * M[6] + Y * M[7] + Z * M[8]) * 255)));
                     }
             } else if (intp == 32845) {
 
@@ -3843,7 +3866,7 @@ let utiftemp;;
                         var g = -1.022 * X + 1.978 * Y + 0.044 * Z
                         var b = 0.061 * X - 0.224 * Y + 1.163 * Z
 
-                        img[qi] = rgb2gray(gamma(Math.min(r, 1)) * 255,gamma(Math.min(g, 1)) * 255,gamma(Math.min(b, 1)) * 255);
+                        img[qi] = rgb2gray(gamma(Math.min(r, 1)) * 255, gamma(Math.min(g, 1)) * 255, gamma(Math.min(b, 1)) * 255);
 
                     }
             } else log("Unknown Photometric interpretation: " + intp);

@@ -329,6 +329,17 @@ export class Controller {
             }
         }), tiles.map(tile => tile.name));
 
+        this.stitchSetup.setOffsets(offsets.map((offset)=>{
+            return {
+                x: Math.round(offset.x * tileImages[0].width / offset.width),
+                y: Math.round(offset.y * tileImages[0].height / offset.height),
+                z: Math.round(offset.z * tileImages[0].depth / offset.depth),
+                width: tileImages[0].width,
+                height: tileImages[0].height,
+                depth: tileImages[0].depth
+            }
+        }));
+
         this.tileImages = tileImages;
 
         // Load output/align_values.json
