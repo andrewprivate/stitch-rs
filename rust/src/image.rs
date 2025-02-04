@@ -32,15 +32,6 @@ pub struct _Image3D16 {
     pub data: Vec<u16>,
 }
 
-pub struct Image3DFile {
-    pub width: usize,
-    pub height: usize,
-    pub depth: usize,
-    pub min: f32,
-    pub max: f32,
-    pub path: PathBuf,
-}
-
 
 #[allow(dead_code)]
 impl Image3D {
@@ -105,6 +96,15 @@ impl Image3D {
     }
 }
 
+
+pub struct Image3DFile {
+    pub width: usize,
+    pub height: usize,
+    pub depth: usize,
+    pub min: f32,
+    pub max: f32,
+    pub path: PathBuf,
+}
 
 impl Image3DFile {
     pub fn new(width: usize, height: usize, depth: usize, min: f32, max: f32, path: PathBuf) -> Image3DFile {

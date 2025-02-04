@@ -750,9 +750,9 @@ fn stitch_2d(config: StitchConfig) {
 }
 
 pub fn normalize_brightness(config: &StitchConfig) {
-    let mut tile_paths = config.tile_paths.clone();
+    let tile_paths = config.tile_paths.clone();
     // New directory /normalized
-    let mut normalized_path = config.output_path.join("normalized");
+    let normalized_path = config.output_path.join("normalized");
     if !normalized_path.exists() {
         std::fs::create_dir_all(&normalized_path).unwrap();
     }
@@ -763,7 +763,7 @@ pub fn normalize_brightness(config: &StitchConfig) {
     println!("Mean brightness: {}", mean_brightness);
 
     // Normalize brightness
-    tile_paths.iter().enumerate().for_each(|(i, path)| {
+    tile_paths.iter().enumerate().for_each(|(_i, path)| {
         let image = if path.extension().unwrap() == "dcm" {
             read_dcm(&path)
         } else {
@@ -974,7 +974,7 @@ pub fn normalize2(path: &Path) {
         read_tiff(&blurred_file_path)
     };
 
-    let blurred_file_path2 = path.with_extension("blurred2.tif");
+    //let blurred_file_path2 = path.with_extension("blurred2.tif");
 
     let mut max: f32 = 0.0;
     blurred_file.data.iter().for_each(|x| {
