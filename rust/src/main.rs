@@ -1,4 +1,4 @@
-use fuse::{fuse_2d, fuse_3d, fuse_3d_float, FuseMode};
+use fuse::{fuse_2d, fuse_3d_float, FuseMode};
 use image::{
     read_dcm, read_dcm_headers, read_image_2d, read_tiff, read_tiff_headers, save_as_dcm_8,
     save_as_tiff_float, save_image_2d, Image3D,
@@ -29,7 +29,17 @@ fn main() {
             println!("Usage: cmd normalize file.tiff");
             return;
         }
-        normalize2(Path::new(&args[2]));
+        let mut dim_mask = (true, true, true);
+        if args.len() > 4 {
+            dim_mask.0 = args[3].parse::<bool>().unwrap();
+            dim_mask.1 = args[4].parse::<bool>().unwrap();
+            dim_mask.2 = args[5].parse::<bool>().unwrap();
+        } else if args.len() > 3 {
+            dim_mask.0 = args[3].parse::<bool>().unwrap();
+            dim_mask.1 = args[4].parse::<bool>().unwrap();
+        }
+
+        normalize2(Path::new(&args[2]), dim_mask);
         return;
     }
 
@@ -628,30 +638,16 @@ fn stitch_3d(config: StitchConfig) {
         .iter()
         .enumerate()
         .for_each(|(i, offset)| {
-            if config.save_float {
-                let fused_image = fuse_3d_float(
-                    &images,
-                    &stitched_result.subgraphs[i],
-                    offset,
-                    config.fuse_mode,
-                );
+            let fused_image = fuse_3d_float(
+                &images,
+                &stitched_result.subgraphs[i],
+                offset,
+                config.fuse_mode,
+            );
 
-                let output_file = format!("fused_{}.tiff", i);
-                let buf = config.output_path.join(output_file);
-                save_as_tiff_float(&buf, &fused_image);
-            } else {
-                let fused_image = fuse_3d(
-                    &images,
-                    &stitched_result.subgraphs[i],
-                    offset,
-                    config.fuse_mode,
-                );
-
-                let output_file = format!("fused_{}.dcm", i);
-                let buf = config.output_path.join(output_file);
-                let path = buf.as_path();
-                save_as_dcm_8(path, fused_image);
-            }
+            let output_file = format!("fused_{}.tiff", i);
+            let buf = config.output_path.join(output_file);
+            save_as_tiff_float(&buf, &fused_image);
         });
 
     println!("Time to fuse images: {:?}", start.elapsed());
@@ -864,7 +860,7 @@ pub fn otsu_threshold(data: &[f32]) -> f32 {
     best_threshold
 }
 
-pub fn normalize2(path: &Path) {
+pub fn normalize2(path: &Path, dim_mask: (bool, bool, bool)) {
     let blurred_file_path = path.with_extension("blurred.tif");
     // check if exists
     let blurred_file = if !blurred_file_path.exists() {
@@ -877,92 +873,100 @@ pub fn normalize2(path: &Path) {
         let kernel = generate_guassian_kernel_3d(kw, 1, 1, 20.0);
 
         for i in 0..5 {
-            // Process x
-            image
-                .data
-                .par_chunks_exact_mut(image.width)
-                .for_each(|chunk| {
-                    let copy = chunk.to_vec();
-                    for x in 0..image.width {
-                        let mut sum = 0.0;
-                        let mut weight_sum = 0.0;
-                        for kx in 0..kw {
-                            let x2 = x as i32 + kx as i32 - kw as i32 / 2;
-                            if x2 >= 0 && x2 < image.width as i32 && copy[x2 as usize].is_finite() {
-                                let val = copy[x2 as usize];
-                                let weight = kernel[kx];
-                                sum += val * weight;
-                                weight_sum += weight;
-                            }
-                        }
-                        chunk[x] = sum / weight_sum;
-                    }
-                });
-
-            println!("Processed x");
-
-            // Process y
-            image
-                .data
-                .par_chunks_exact_mut(image.width * image.height)
-                .for_each(|chunk| {
-                    let mut copy = vec![0.0; chunk.len()];
-                    transpose::transpose(chunk, &mut copy, image.width, image.height);
-                    for x in 0..image.width {
-                        for y in 0..image.height {
+            if dim_mask.0 {
+                // Process x
+                image
+                    .data
+                    .par_chunks_exact_mut(image.width)
+                    .for_each(|chunk| {
+                        let copy = chunk.to_vec();
+                        for x in 0..image.width {
                             let mut sum = 0.0;
                             let mut weight_sum = 0.0;
-                            for ky in 0..kh {
-                                let y2 = y as i32 + ky as i32 - kh as i32 / 2;
-                                if y2 >= 0
-                                    && y2 < image.height as i32
-                                    && copy[x * image.height + y2 as usize].is_finite()
+                            for kx in 0..kw {
+                                let x2 = x as i32 + kx as i32 - kw as i32 / 2;
+                                if x2 >= 0
+                                    && x2 < image.width as i32
+                                    && copy[x2 as usize].is_finite()
                                 {
-                                    let val = copy[x * image.height + y2 as usize];
-                                    let weight = kernel[ky];
+                                    let val = copy[x2 as usize];
+                                    let weight = kernel[kx];
                                     sum += val * weight;
                                     weight_sum += weight;
                                 }
                             }
-                            chunk[y * image.width + x] = sum / weight_sum;
+                            chunk[x] = sum / weight_sum;
                         }
-                    }
-                });
+                    });
 
-            println!("Processed y");
-
-            // Process z
-            let mut scratch = vec![0.0; image.depth];
-
-            for x in 0..image.width {
-                for y in 0..image.height {
-                    for z in 0..image.depth {
-                        scratch[z] =
-                            image.data[z * image.width * image.height + y * image.width + x];
-                    }
-
-                    for z in 0..image.depth {
-                        let mut sum = 0.0;
-                        let mut weight_sum = 0.0;
-                        for kz in 0..kd {
-                            let z2 = z as i32 + kz as i32 - kd as i32 / 2;
-                            if z2 >= 0
-                                && z2 < image.depth as i32
-                                && scratch[z2 as usize].is_finite()
-                            {
-                                let val = scratch[z2 as usize];
-                                let weight = kernel[kz];
-                                sum += val * weight;
-                                weight_sum += weight;
-                            }
-                        }
-                        image.data[z * image.width * image.height + y * image.width + x] =
-                            sum / weight_sum;
-                    }
-                }
+                println!("Processed x");
             }
 
-            println!("Processed z");
+            if dim_mask.1 {
+                // Process y
+                image
+                    .data
+                    .par_chunks_exact_mut(image.width * image.height)
+                    .for_each(|chunk| {
+                        let mut copy = vec![0.0; chunk.len()];
+                        transpose::transpose(chunk, &mut copy, image.width, image.height);
+                        for x in 0..image.width {
+                            for y in 0..image.height {
+                                let mut sum = 0.0;
+                                let mut weight_sum = 0.0;
+                                for ky in 0..kh {
+                                    let y2 = y as i32 + ky as i32 - kh as i32 / 2;
+                                    if y2 >= 0
+                                        && y2 < image.height as i32
+                                        && copy[x * image.height + y2 as usize].is_finite()
+                                    {
+                                        let val = copy[x * image.height + y2 as usize];
+                                        let weight = kernel[ky];
+                                        sum += val * weight;
+                                        weight_sum += weight;
+                                    }
+                                }
+                                chunk[y * image.width + x] = sum / weight_sum;
+                            }
+                        }
+                    });
+
+                println!("Processed y");
+            }
+
+            // Process z
+            if dim_mask.2 {
+                let mut scratch = vec![0.0; image.depth];
+
+                for x in 0..image.width {
+                    for y in 0..image.height {
+                        for z in 0..image.depth {
+                            scratch[z] =
+                                image.data[z * image.width * image.height + y * image.width + x];
+                        }
+
+                        for z in 0..image.depth {
+                            let mut sum = 0.0;
+                            let mut weight_sum = 0.0;
+                            for kz in 0..kd {
+                                let z2 = z as i32 + kz as i32 - kd as i32 / 2;
+                                if z2 >= 0
+                                    && z2 < image.depth as i32
+                                    && scratch[z2 as usize].is_finite()
+                                {
+                                    let val = scratch[z2 as usize];
+                                    let weight = kernel[kz];
+                                    sum += val * weight;
+                                    weight_sum += weight;
+                                }
+                            }
+                            image.data[z * image.width * image.height + y * image.width + x] =
+                                sum / weight_sum;
+                        }
+                    }
+                }
+                println!("Processed z");
+            }
 
             println!("Iteration: {}", i);
         }
