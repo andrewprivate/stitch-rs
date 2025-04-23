@@ -136,7 +136,8 @@ pub fn stitch(
     let todo: usize = overlap_map.iter().map(|x| x.len()).sum();
     let done = Mutex::new(0);
 
-    let mut pairs: Vec<Pair2D> = overlap_map
+    let mut pairs: Vec<Pair2D> = if dimension_mask.0 || dimension_mask.1 {
+        overlap_map
         .par_iter()
         .enumerate()
         .flat_map(|(i, overlap_list)| {
@@ -363,7 +364,11 @@ pub fn stitch(
                 })
                 .collect::<Vec<_>>()
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+    } else {
+        println!("No dimension mask, skipping pair generation");
+        vec![]
+    };
 
     println!("Global optimization");
     let mut offsets;

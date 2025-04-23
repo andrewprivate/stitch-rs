@@ -170,304 +170,309 @@ pub fn stitch(
 
     let todo: usize = overlap_map.iter().map(|x| x.len()).sum();
     let done = Mutex::new(0);
-    let mut pairs: Vec<Pair3D> = overlap_map
-        .iter()
-        .enumerate()
-        .flat_map(|(i, overlap_list)| {
-            let image_ref_file = &images[i];
-            let image_ref = image_ref_file.get_image();
+    let mut pairs: Vec<Pair3D> = if dimension_mask.0 || dimension_mask.1 || dimension_mask.2 {
+        overlap_map
+            .iter()
+            .enumerate()
+            .flat_map(|(i, overlap_list)| {
+                let image_ref_file = &images[i];
+                let image_ref = image_ref_file.get_image();
 
-            overlap_list
-                .iter()
-                .map(|&j| {
-                    let layout_ref = &layout[i];
-                    let layout_move = &layout[j];
-                    let image_move = images[j].get_image();
+                overlap_list
+                    .iter()
+                    .map(|&j| {
+                        let layout_ref = &layout[i];
+                        let layout_move = &layout[j];
+                        let image_move = images[j].get_image();
 
-                    println!("Processing {} - {}", i, j);
+                        println!("Processing {} - {}", i, j);
 
-                    let start = std::time::Instant::now();
+                        let start = std::time::Instant::now();
 
-                    let ref_box = IBox3D::from_image(&image_ref);
-                    let move_box = IBox3D::from_image(&image_move);
+                        let ref_box = IBox3D::from_image(&image_ref);
+                        let move_box = IBox3D::from_image(&image_move);
 
-                    let (ref_roi, mov_roi) = get_intersection(
-                        &ref_box,
-                        layout_ref,
-                        &move_box,
-                        layout_move,
-                        overlap_ratio,
-                    );
+                        let (ref_roi, mov_roi) = get_intersection(
+                            &ref_box,
+                            layout_ref,
+                            &move_box,
+                            layout_move,
+                            overlap_ratio,
+                        );
 
-                    let ref_img = extract_image_with_roi(&image_ref, &ref_roi);
-                    let mov_img = extract_image_with_roi(&image_move, &mov_roi);
+                        let ref_img = extract_image_with_roi(&image_ref, &ref_roi);
+                        let mov_img = extract_image_with_roi(&image_move, &mov_roi);
 
-                    drop(image_move);
+                        drop(image_move);
 
-                    let max_size = (
-                        ref_roi.width.max(mov_roi.width) as usize,
-                        ref_roi.height.max(mov_roi.height) as usize,
-                        ref_roi.depth.max(mov_roi.depth) as usize,
-                    );
+                        let max_size = (
+                            ref_roi.width.max(mov_roi.width) as usize,
+                            ref_roi.height.max(mov_roi.height) as usize,
+                            ref_roi.depth.max(mov_roi.depth) as usize,
+                        );
 
-                    if max_size.0 * max_size.1 * max_size.2 == 0 {
-                        println!("No overlap");
-                        return Pair3D {
+                        if max_size.0 * max_size.1 * max_size.2 == 0 {
+                            println!("No overlap");
+                            return Pair3D {
+                                i,
+                                j,
+                                offset: (0, 0, 0),
+                                weight: 0.0,
+                                valid: false,
+                            };
+                        }
+
+                        println!("Intersection took {:?}", start.elapsed());
+
+                        // if i == 0 && j == 5 {
+                        //     let file_path = "ref.dcm";
+                        //     save_as_dcm(Path::new(file_path), &ref_img);
+                        //     let file_path = "mov.dcm";
+                        //     save_as_dcm(Path::new(file_path), &mov_img);
+                        // }
+
+                        let start = std::time::Instant::now();
+
+                        let mut ref_fft =
+                            to_complex_with_padding(&ref_img, max_size.0, max_size.1, max_size.2);
+                        let mut mov_fft =
+                            to_complex_with_padding(&mov_img, max_size.0, max_size.1, max_size.2);
+
+                        println!("Padding took {:?}", start.elapsed());
+
+                        let start = std::time::Instant::now();
+
+                        fft_3d_par(
+                            max_size.0,
+                            max_size.1,
+                            max_size.2,
+                            &mut ref_fft,
+                            rustfft::FftDirection::Forward,
+                        );
+
+                        fft_3d_par(
+                            max_size.0,
+                            max_size.1,
+                            max_size.2,
+                            &mut mov_fft,
+                            rustfft::FftDirection::Forward,
+                        );
+
+                        println!("FFT took {:?}", start.elapsed());
+
+                        let start = std::time::Instant::now();
+
+                        let mut phase_corr = ref_fft
+                            .par_iter()
+                            .zip(mov_fft.par_iter())
+                            .map(|(a, b)| {
+                                let res = a * b.conj();
+                                if !use_phase_correlation {
+                                    return res;
+                                }
+
+                                let norm = res.norm();
+                                if norm > f32::EPSILON {
+                                    res / norm
+                                } else {
+                                    Complex::zero()
+                                }
+                            })
+                            .collect::<Vec<_>>();
+
+                        fft_3d_par(
+                            max_size.2,
+                            max_size.1,
+                            max_size.0,
+                            &mut phase_corr,
+                            rustfft::FftDirection::Inverse,
+                        );
+
+                        println!("Phase correlation took {:?}", start.elapsed());
+
+                        drop(ref_fft);
+                        drop(mov_fft);
+
+                        let mut image = Image3D {
+                            width: max_size.0,
+                            height: max_size.1,
+                            depth: max_size.2,
+                            min: 0.0,
+                            max: 0.0,
+                            data: phase_corr.par_iter().map(|x| x.norm()).collect::<Vec<_>>(),
+                        };
+
+                        drop(phase_corr);
+
+                        // Compute prior and apply
+                        if use_prior {
+                            let half_w = max_size.0 as i32 / 2;
+                            let half_h = max_size.1 as i32 / 2;
+                            let half_d = max_size.2 as i32 / 2;
+                            image.data.iter_mut().enumerate().for_each(|(i, val)| {
+                                let x = i as i32 % max_size.0 as i32;
+                                let y = (i as i32 / max_size.0 as i32) % max_size.1 as i32;
+                                let z = i as i32 / (max_size.0 * max_size.1) as i32;
+
+                                let x = if x >= half_w {
+                                    x - max_size.0 as i32
+                                } else {
+                                    x
+                                };
+
+                                let y = if y >= half_h {
+                                    y - max_size.1 as i32
+                                } else {
+                                    y
+                                };
+
+                                let z = if z >= half_d {
+                                    z - max_size.2 as i32
+                                } else {
+                                    z
+                                };
+
+                                *val *= guassian_3d(
+                                    x as f32,
+                                    y as f32,
+                                    z as f32,
+                                    0.0,
+                                    0.0,
+                                    0.0,
+                                    prior_sigmas.0,
+                                    prior_sigmas.1,
+                                    prior_sigmas.2,
+                                );
+                            });
+                        }
+
+                        let start = std::time::Instant::now();
+
+                        let mut peaks = find_peaks_3d(&image, check_peaks)
+                            .iter()
+                            .flat_map(|peak| disambiguate_3d(max_size.0, max_size.1, max_size.2, *peak))
+                            .collect::<Vec<_>>();
+
+                        // Filter peaks
+                        let ratio = 0.75;
+                        let max_shift = (
+                            (max_size.0 as f32 * ratio) as i64,
+                            (max_size.0 as f32 * ratio) as i64,
+                            (max_size.0 as f32 * ratio) as i64,
+                        );
+
+                        peaks.retain(|peak| {
+                            peak.0 >= -max_shift.0
+                                && peak.0 <= max_shift.0
+                                && peak.1 >= -max_shift.1
+                                && peak.1 <= max_shift.1
+                                && peak.2 >= -max_shift.2
+                                && peak.2 <= max_shift.2
+                        });
+
+                        // Mask peaks
+                        peaks.iter_mut().for_each(|peak| {
+                            if !dimension_mask.0 {
+                                peak.0 = 0;
+                            }
+
+                            if !dimension_mask.1 {
+                                peak.1 = 0;
+                            }
+
+                            if !dimension_mask.2 {
+                                peak.2 = 0;
+                            }
+                        });
+
+                        // Test peaks
+                        peaks.par_iter_mut().for_each(|peak| {
+                            let res = test_cross_3d(&ref_img, &mov_img, (peak.0, peak.1, peak.2), 0.01);
+                            peak.3 = res.0;
+                        });
+
+                        drop(ref_img);
+                        drop(mov_img);
+
+                        // Multiply cc by prior
+                        if use_prior {
+                            peaks.iter_mut().for_each(|peak| {
+                                let x = peak.0 as i32;
+                                let y = peak.1 as i32;
+                                let z = peak.2 as i32;
+                                peak.3 *= guassian_3d(
+                                    x as f32,
+                                    y as f32,
+                                    z as f32,
+                                    0.0,
+                                    0.0,
+                                    0.0,
+                                    prior_sigmas.0,
+                                    prior_sigmas.1,
+                                    prior_sigmas.2,
+                                );
+                            });
+                        }
+
+                        // Sort by highest R
+                        peaks.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap());
+
+                        // Adjust peaks by roi
+                        // find roi center pos
+                        let ref_roi_center = (
+                            ref_roi.x, // + ref_roi.width / 2,
+                            ref_roi.y, //+ ref_roi.height / 2,
+                            ref_roi.z //+ ref_roi.depth / 2,
+                        );
+
+                        let mov_roi_center = (
+                            mov_roi.x, //+ mov_roi.width / 2,
+                            mov_roi.y, //+ mov_roi.height / 2,
+                            mov_roi.z //+ mov_roi.depth / 2,
+                        );
+
+                        let diff = (
+                            mov_roi_center.0 - ref_roi_center.0,
+                            mov_roi_center.1 - ref_roi_center.1,
+                            mov_roi_center.2 - ref_roi_center.2,
+                        );
+                        peaks.iter_mut().for_each(|peak| {
+                            peak.0 += -diff.0;
+                            peak.1 += -diff.1;
+                            peak.2 += -diff.2;
+                        });
+
+                        println!("Peak finding took {:?}", start.elapsed());
+
+                        let mut done2 = done.lock().unwrap();
+                        *done2 += 1;
+                        let first_peak = peaks.first().unwrap_or(&(0, 0, 0, 0.0));
+
+                        println!(
+                            "Progress {}/{}: {} - {} {:?}",
+                            *done2,
+                            todo,
                             i,
                             j,
-                            offset: (0, 0, 0),
-                            weight: 0.0,
-                            valid: false,
-                        };
-                    }
+                            first_peak
+                        );
 
-                    println!("Intersection took {:?}", start.elapsed());
-
-                    // if i == 0 && j == 5 {
-                    //     let file_path = "ref.dcm";
-                    //     save_as_dcm(Path::new(file_path), &ref_img);
-                    //     let file_path = "mov.dcm";
-                    //     save_as_dcm(Path::new(file_path), &mov_img);
-                    // }
-
-                    let start = std::time::Instant::now();
-
-                    let mut ref_fft =
-                        to_complex_with_padding(&ref_img, max_size.0, max_size.1, max_size.2);
-                    let mut mov_fft =
-                        to_complex_with_padding(&mov_img, max_size.0, max_size.1, max_size.2);
-
-                    println!("Padding took {:?}", start.elapsed());
-
-                    let start = std::time::Instant::now();
-
-                    fft_3d_par(
-                        max_size.0,
-                        max_size.1,
-                        max_size.2,
-                        &mut ref_fft,
-                        rustfft::FftDirection::Forward,
-                    );
-
-                    fft_3d_par(
-                        max_size.0,
-                        max_size.1,
-                        max_size.2,
-                        &mut mov_fft,
-                        rustfft::FftDirection::Forward,
-                    );
-
-                    println!("FFT took {:?}", start.elapsed());
-
-                    let start = std::time::Instant::now();
-
-                    let mut phase_corr = ref_fft
-                        .par_iter()
-                        .zip(mov_fft.par_iter())
-                        .map(|(a, b)| {
-                            let res = a * b.conj();
-                            if !use_phase_correlation {
-                                return res;
-                            }
-
-                            let norm = res.norm();
-                            if norm > f32::EPSILON {
-                                res / norm
-                            } else {
-                                Complex::zero()
-                            }
-                        })
-                        .collect::<Vec<_>>();
-
-                    fft_3d_par(
-                        max_size.2,
-                        max_size.1,
-                        max_size.0,
-                        &mut phase_corr,
-                        rustfft::FftDirection::Inverse,
-                    );
-
-                    println!("Phase correlation took {:?}", start.elapsed());
-
-                    drop(ref_fft);
-                    drop(mov_fft);
-
-                    let mut image = Image3D {
-                        width: max_size.0,
-                        height: max_size.1,
-                        depth: max_size.2,
-                        min: 0.0,
-                        max: 0.0,
-                        data: phase_corr.par_iter().map(|x| x.norm()).collect::<Vec<_>>(),
-                    };
-
-                    drop(phase_corr);
-
-                    // Compute prior and apply
-                    if use_prior {
-                        let half_w = max_size.0 as i32 / 2;
-                        let half_h = max_size.1 as i32 / 2;
-                        let half_d = max_size.2 as i32 / 2;
-                        image.data.iter_mut().enumerate().for_each(|(i, val)| {
-                            let x = i as i32 % max_size.0 as i32;
-                            let y = (i as i32 / max_size.0 as i32) % max_size.1 as i32;
-                            let z = i as i32 / (max_size.0 * max_size.1) as i32;
-
-                            let x = if x >= half_w {
-                                x - max_size.0 as i32
-                            } else {
-                                x
-                            };
-
-                            let y = if y >= half_h {
-                                y - max_size.1 as i32
-                            } else {
-                                y
-                            };
-
-                            let z = if z >= half_d {
-                                z - max_size.2 as i32
-                            } else {
-                                z
-                            };
-
-                            *val *= guassian_3d(
-                                x as f32,
-                                y as f32,
-                                z as f32,
-                                0.0,
-                                0.0,
-                                0.0,
-                                prior_sigmas.0,
-                                prior_sigmas.1,
-                                prior_sigmas.2,
-                            );
-                        });
-                    }
-
-                    let start = std::time::Instant::now();
-
-                    let mut peaks = find_peaks_3d(&image, check_peaks)
-                        .iter()
-                        .flat_map(|peak| disambiguate_3d(max_size.0, max_size.1, max_size.2, *peak))
-                        .collect::<Vec<_>>();
-
-                    // Filter peaks
-                    let ratio = 0.75;
-                    let max_shift = (
-                        (max_size.0 as f32 * ratio) as i64,
-                        (max_size.0 as f32 * ratio) as i64,
-                        (max_size.0 as f32 * ratio) as i64,
-                    );
-
-                    peaks.retain(|peak| {
-                        peak.0 >= -max_shift.0
-                            && peak.0 <= max_shift.0
-                            && peak.1 >= -max_shift.1
-                            && peak.1 <= max_shift.1
-                            && peak.2 >= -max_shift.2
-                            && peak.2 <= max_shift.2
-                    });
-
-                    // Mask peaks
-                    peaks.iter_mut().for_each(|peak| {
-                        if !dimension_mask.0 {
-                            peak.0 = 0;
+                    
+                        Pair3D {
+                            i,
+                            j,
+                            offset: (first_peak.0, first_peak.1, first_peak.2),
+                            weight: first_peak.3,
+                            valid: peaks.len() > 0 && first_peak.3 > correlation_threshold,
                         }
-
-                        if !dimension_mask.1 {
-                            peak.1 = 0;
-                        }
-
-                        if !dimension_mask.2 {
-                            peak.2 = 0;
-                        }
-                    });
-
-                    // Test peaks
-                    peaks.par_iter_mut().for_each(|peak| {
-                        let res = test_cross_3d(&ref_img, &mov_img, (peak.0, peak.1, peak.2), 0.01);
-                        peak.3 = res.0;
-                    });
-
-                    drop(ref_img);
-                    drop(mov_img);
-
-                    // Multiply cc by prior
-                    if use_prior {
-                        peaks.iter_mut().for_each(|peak| {
-                            let x = peak.0 as i32;
-                            let y = peak.1 as i32;
-                            let z = peak.2 as i32;
-                            peak.3 *= guassian_3d(
-                                x as f32,
-                                y as f32,
-                                z as f32,
-                                0.0,
-                                0.0,
-                                0.0,
-                                prior_sigmas.0,
-                                prior_sigmas.1,
-                                prior_sigmas.2,
-                            );
-                        });
-                    }
-
-                    // Sort by highest R
-                    peaks.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap());
-
-                    // Adjust peaks by roi
-                    // find roi center pos
-                    let ref_roi_center = (
-                        ref_roi.x, // + ref_roi.width / 2,
-                        ref_roi.y, //+ ref_roi.height / 2,
-                        ref_roi.z //+ ref_roi.depth / 2,
-                    );
-
-                    let mov_roi_center = (
-                        mov_roi.x, //+ mov_roi.width / 2,
-                        mov_roi.y, //+ mov_roi.height / 2,
-                        mov_roi.z //+ mov_roi.depth / 2,
-                    );
-
-                    let diff = (
-                        mov_roi_center.0 - ref_roi_center.0,
-                        mov_roi_center.1 - ref_roi_center.1,
-                        mov_roi_center.2 - ref_roi_center.2,
-                    );
-                    peaks.iter_mut().for_each(|peak| {
-                        peak.0 += -diff.0;
-                        peak.1 += -diff.1;
-                        peak.2 += -diff.2;
-                    });
-
-                    println!("Peak finding took {:?}", start.elapsed());
-
-                    let mut done2 = done.lock().unwrap();
-                    *done2 += 1;
-                    let first_peak = peaks.first().unwrap_or(&(0, 0, 0, 0.0));
-
-                    println!(
-                        "Progress {}/{}: {} - {} {:?}",
-                        *done2,
-                        todo,
-                        i,
-                        j,
-                        first_peak
-                    );
-
-                   
-                    Pair3D {
-                        i,
-                        j,
-                        offset: (first_peak.0, first_peak.1, first_peak.2),
-                        weight: first_peak.3,
-                        valid: peaks.len() > 0 && first_peak.3 > correlation_threshold,
-                    }
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    } else {
+        println!("Dimension mask is not set, skipping pair generation");
+        vec![]
+    };
 
     println!("Global optimization");
     let mut offsets;
